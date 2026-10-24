@@ -18,6 +18,7 @@ from deckgen.research.tools import ResearchTools
 from deckgen.schemas import DeckSpec
 from deckgen.schemas.qa import QAReport
 from deckgen.schemas.research import Brief, Findings, Outline
+from deckgen.spec.deck_checks import coverage
 from deckgen.spec.spec_generator import domain, generate_spec
 
 STAGES = ["plan", "research", "outline", "spec", "qa", "report"]
@@ -96,7 +97,11 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
     used_ids = sorted({r for s in spec.slides for r in s.source_refs})
     write_sources(run_dir / "sources.md", [by_id[i] for i in used_ids if i in by_id])
     tracer = getattr(llm, "tracer", None)
+    notes_path = run_dir / "deck_notes.json"
+    deck_notes = json.loads(notes_path.read_text(encoding="utf-8")) if notes_path.exists() else {}
     report = {
+        "coverage": coverage(brief, findings.findings, spec),
+        "deck_problems_unresolved": deck_notes.get("unresolved", []), "deck_problems_repaired_slides": deck_notes.get("repaired_slides", []),
         "run_id": run_dir.name, "topic": req.topic, "slides": len(spec.slides), "findings": len(findings.findings),
         "findings_used": len(used_ids), "research_stats": findings.stats, "stage_seconds": timings,
         "file_errors": validate_pptx.validate(deck, names), "images": len(images), "render_error": render_error,
@@ -137,7 +142,9 @@ def report_md(r: dict) -> str:
             f"- final images: {r['images']}" + (f" (render error: {r['render_error']})" if r["render_error"] else ""),
             f"- first-attempt schema pass rate by stage: {r['first_attempt_rate']}",
             f"- QA blocking issues remaining: {r['qa_blocking_remaining']} (stopped: {r['qa_stopped']})",
-            f"- models: {r['models']}", f"- {r['llm']}"]
+            f"- models: {r['models']}", f"- {r['llm']}",
+            f"- cross-slide problems repaired on slides {r['deck_problems_repaired_slides']}; unresolved: {r['deck_problems_unresolved'] or 'none'}",
+            "- question coverage:"] + [f"  - {q}: {v}" for q, v in r["coverage"].items()]
     for q in r["qa_rounds"]:
         rows.append(f"  - round {q['round']}: {q['action']} -> {'kept' if q['accepted'] else 'reverted'}, score {q['score']}")
     return "\n".join(rows)

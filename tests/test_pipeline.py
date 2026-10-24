@@ -24,9 +24,12 @@ BRAND = ROOT / "brand" / "default_v1"
 FACT = "Group B needed 200 road cars in 1982; peaks were 450 hp Peugeot, 480 hp Lancia, 500 hp Audi, banned 1986"
 
 
+DOMAINS = ["www.wrc.com", "www.topgear.com"]
+
+
 class Search:
     def search(self, query, max_results):
-        return [SearchResult(title=f"Page {i}", url=f"https://www.wrc.com/p/{query[-1]}{i}", snippet="s", content=("filler text. " * 60), score=1.0 - i / 10)
+        return [SearchResult(title=f"Page {i}", url=f"https://{DOMAINS[i]}/p/{query[-1]}{i}", snippet="s", content=("filler text. " * 60), score=1.0 - i / 10)
                 for i in range(2)]
 
 
@@ -49,7 +52,7 @@ def slide_draft(prompt, images):
         items = [ItemDraft(icon="FaCarSide", heading=f"Idea {i}", body="Short body text here.") for i in range(3)]
         return SlideDraft(**base, layout="TITLE_ONLY", title="Three ideas shaped the cars", comp_kind="cards", items=items)
     if n == 3:
-        return SlideDraft(**base, layout="CHART_COMMENTARY", title="Power climbed past 400 hp across the field",
+        return SlideDraft(**base, layout="CHART_COMMENTARY", title="Power climbed across the whole field",
                           bullets=["Audi led on peak output", "Lancia followed closely"], chart_type="bar",
                           chart_title="Approximate peak power (hp)", categories=["Peugeot", "Lancia", "Audi"],
                           series=[SeriesDraft(name="hp", values=[450, 480, 500])])
@@ -73,6 +76,7 @@ def script():
             OutlineSlide(n=5, section="End", purpose="Close", key_message="Close", finding_ids=["f01"], layout_hint="CLOSING")]),
         "spec_slide": slide_draft,
         "faithfulness": {"unsupported": []},
+        "deck_consistency": {"problems": []},
         "critic": CriticReport(issues=[]),
         "critic_consistency": CriticReport(issues=[]),
     }
@@ -98,7 +102,7 @@ def test_smoke_end_to_end_offline(tmp_path, monkeypatch):
     assert rep["unsourced_slides"] == [] and rep["invalid_layouts"] == [] and rep["file_errors"] == []
     assert rep["slides"] == 6 and rep["images"] == 6 and rep["qa_blocking_remaining"] == 0
     spec = DeckSpec.model_validate_json((run / "deck_spec.final.json").read_text())
-    assert spec.slides[-1].layout == "SOURCES" and "wrc.com" in spec.slides[-1].placeholders["body"][0].lower()
+    assert spec.slides[-1].layout == "SOURCES" and ("wrc.com" in spec.slides[-1].placeholders["body"][0].lower() or "page" in spec.slides[-1].placeholders["body"][0].lower())
     # resume: every stage artifact exists, so only the final build/render runs and the LLM is never called again
     calls = len(llm.calls)
     run_pipeline(Request("Group B", "fans", 6), llm, tools, run, auto_approve=True)

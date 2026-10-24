@@ -74,7 +74,7 @@ class GeminiLLM:
         from google.genai import errors
 
         for m in ((model,) if CONFIG.pin_models else (model, *CONFIG.fallback_models)):
-            for k in range(5 if CONFIG.pin_models else 3):
+            for k in range(8 if CONFIG.pin_models else 3):
                 try:
                     return self.client.models.generate_content(model=m, contents=parts, config=cfg), m
                 except (errors.ServerError, errors.ClientError) as e:

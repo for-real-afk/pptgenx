@@ -46,8 +46,8 @@
         {
           "name": "title",
           "type": "title",
-          "font_size": 32,
-          "max_chars": 54
+          "font_size": 28,
+          "max_chars": 124
         }
       ]
     },
@@ -59,8 +59,8 @@
         {
           "name": "title",
           "type": "title",
-          "font_size": 32,
-          "max_chars": 54
+          "font_size": 28,
+          "max_chars": 124
         },
         {
           "name": "chart",
@@ -84,8 +84,8 @@
         {
           "name": "title",
           "type": "title",
-          "font_size": 32,
-          "max_chars": 54
+          "font_size": 28,
+          "max_chars": 124
         },
         {
           "name": "table",
@@ -122,8 +122,8 @@
         {
           "name": "title",
           "type": "title",
-          "font_size": 32,
-          "max_chars": 54
+          "font_size": 28,
+          "max_chars": 124
         },
         {
           "name": "body",

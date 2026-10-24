@@ -65,6 +65,11 @@ class DraftConversionError(ValueError):
     pass
 
 
+def _brief(e: ValidationError) -> str:
+    """Compact, model-readable validation errors: 'items: List should have at least 3 items'."""
+    return "; ".join(f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in e.errors()[:4])
+
+
 def _composition(d: SlideDraft):
     k, it = d.comp_kind, d.items
     try:
@@ -79,7 +84,7 @@ def _composition(d: SlideDraft):
         if k == "comparison":
             return ComparisonComp(kind=k, items=[dict(heading=i.heading, bullets=i.bullets) for i in it])
     except ValidationError as e:
-        raise DraftConversionError(f"{d.id}: {k} items invalid: {str(e)[:300]}") from e
+        raise DraftConversionError(f"{d.id}: {k} needs a valid item list ({_brief(e)}); respect min/max item counts") from e
     return None
 
 
@@ -102,4 +107,4 @@ def draft_to_slide(d: SlideDraft) -> SlideSpec:
                          composition=_composition(d), chart=chart, table=table, speaker_notes=d.speaker_notes,
                          source_refs=d.source_refs)
     except ValidationError as e:
-        raise DraftConversionError(f"{d.id}: {str(e)[:300]}") from e
+        raise DraftConversionError(f"{d.id}: {_brief(e)}") from e

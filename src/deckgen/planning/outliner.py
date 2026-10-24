@@ -57,7 +57,7 @@ def outline(llm: LLM, brief: Brief, findings: Findings, retries: int = 3) -> Out
         "automatically). Slide 1 has layout_hint TITLE; the last slide has layout_hint CLOSING (conclusion and next steps). "
         "Other slides use layout_hint TITLE_ONLY (default; cards, stats, timeline, comparison or icon rows), CHART_COMMENTARY or TABLE; no section dividers. Each slide: n, section "
         "(contiguous groups, 3-5 sections total), purpose, key_message (one sentence stating the point), finding_ids "
-        "(2-4 ids that support it; use the ids exactly). Cover the findings broadly; prefer high-confidence ones; use a "
+        "(2-4 ids that support it; use the ids exactly). Prefer findings from at least two different websites for any slide with numbers or superlatives. Cover the findings broadly; prefer high-confidence ones; use a "
         "CHART_COMMENTARY slide only where findings hold comparable numbers. Do not repeat the same message."
     )
     errs: list[str] = []

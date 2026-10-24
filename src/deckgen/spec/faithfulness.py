@@ -27,9 +27,9 @@ def unsupported_statements(llm: LLM, s: SlideSpec, cited: list[Finding]) -> list
     facts = "\n".join(f"{f.id}: {f.claim} (evidence: {f.evidence_snippet})" for f in cited)
     prompt = (
         f"FINDINGS:\n{facts}\n\nSLIDE (visible text and data):\n{slide_text(s)}\n\n"
-        "List every factual statement on the slide (events, names, dates, numbers, causes, rankings, results) that the "
-        "findings do not clearly support, including vague placeholders presented as data (for example 'N/A', 'Low', 'Extreme') "
-        "and explanations or causes the findings never state. Quote each unsupported statement briefly. Return an empty "
-        "list if everything is supported."
+        "List the factual statements on the slide that the findings do not support: invented or altered events, names, "
+        "dates, numbers, results, causes and effects, rankings, and vague placeholders presented as data (for example 'N/A', "
+        "'Low', 'Extreme'). Treat claim strength as substantive: words such as first, only, all, every, always, never, most, best, exponential, dramatic or unprecedented are unsupported unless the findings use them. Do NOT flag wording, paraphrase, short headings, or light connective phrasing that adds no new "
+        "fact. Quote each unsupported statement briefly. Return an empty list if everything is supported."
     )
     return llm.generate(stage="faithfulness", system=SYSTEM, prompt=prompt, schema=Verdict).unsupported

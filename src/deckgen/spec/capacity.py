@@ -47,7 +47,12 @@ def comparison_max_bullets() -> int:
 
 
 def title_limit() -> int:
-    return fit(CONTENT_W, 0.95, 32, True)
+    """Hard limit: two lines at 28 pt. Prompts aim for one line (about half of this)."""
+    return fit(CONTENT_W, 1.15, 28, True)
+
+
+def title_aim() -> int:
+    return fit(CONTENT_W, 0.5, 28, True)  # one line
 
 
 def commentary_limit() -> tuple[int, int]:

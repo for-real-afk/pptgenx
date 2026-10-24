@@ -11,6 +11,7 @@ from deckgen.config import CONFIG
 from deckgen.schemas import SlideSpec
 from deckgen.schemas.research import Finding
 from deckgen.spec import capacity
+from deckgen.spec.claims import claim_errors
 
 NO_SOURCE_LAYOUTS = {"TITLE", "SECTION", "SOURCES"}
 SHORT_TITLE_OK = {"TITLE", "SECTION", "SOURCES", "CLOSING"}
@@ -42,7 +43,7 @@ def check_slide(s: SlideSpec, findings: dict[str, Finding], prev: list[SlideSpec
     if s.layout not in SHORT_TITLE_OK and n_words(s.title) < 4:
         e.append(f"title '{s.title}' must state the message (at least 4 words)")
     if s.layout not in SHORT_TITLE_OK and len(s.title) > capacity.title_limit():
-        e.append(f"title '{s.title}' is {len(s.title)} chars; it must be at most {capacity.title_limit()}: remove at least {len(s.title) - capacity.title_limit()} chars (aim for {int(capacity.title_limit() * 0.85)})")
+        e.append(f"title '{s.title}' is {len(s.title)} chars; it must be at most {capacity.title_limit()}: remove at least {len(s.title) - capacity.title_limit()} chars (aim for {capacity.title_aim()})")
 
     # provenance
     if s.layout not in NO_SOURCE_LAYOUTS:
@@ -92,11 +93,11 @@ def check_slide(s: SlideSpec, findings: dict[str, Finding], prev: list[SlideSpec
             if c.kind == "stats":
                 for num in _numbers(it.value):
                     if num not in known_nums:
-                        e.append(f"stat value '{it.value}' is not in the cited findings")
+                        e.append(f"stat value '{it.value}' is not in the cited findings; numbers available: {sorted(known_nums)[:25]} (use one of these, or switch to cards or icon_rows)")
             if c.kind == "timeline":
                 for y in re.findall(r"\b\d{4}\b", it.year):
                     if y not in known_nums:
-                        e.append(f"timeline year {y} is not in the cited findings")
+                        e.append(f"timeline year {y} is not in the cited findings; years available: {sorted(n for n in known_nums if len(n) == 4)}")
     if s.chart:
         ch = s.chart
         for ser in ch.series:
@@ -121,6 +122,8 @@ def check_slide(s: SlideSpec, findings: dict[str, Finding], prev: list[SlideSpec
         e.append("TABLE layout needs a table")
     if s.layout == "TITLE_ONLY" and not c:
         e.append("TITLE_ONLY needs a composition (cards, icon_rows, stats, timeline or comparison)")
+
+    e += claim_errors(s, findings)
 
     # variety
     key = (s.layout, c.kind if c else None)

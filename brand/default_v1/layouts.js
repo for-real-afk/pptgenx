@@ -3,7 +3,7 @@
 const { W, H, MARGIN } = require("../../renderer/grid");
 const { iconPng } = require("../../renderer/compose/icons");
 
-const TITLE_BOX = { x: MARGIN, y: 0.45, w: W - 2 * MARGIN, h: 0.95 };
+const TITLE_BOX = { x: MARGIN, y: 0.4, w: W - 2 * MARGIN, h: 1.15 }; // two lines at 28 pt
 
 const LAYOUTS = [
   {
@@ -26,14 +26,14 @@ const LAYOUTS = [
     name: "TITLE_ONLY", dark: false,
     use_when: "Default content frame; compose cards, stats, timeline, comparison or icon rows below the title.",
     placeholders: [
-      { name: "title", type: "title", ...TITLE_BOX, fontSize: 32, bold: true, color: "tx2", valign: "middle" },
+      { name: "title", type: "title", ...TITLE_BOX, fontSize: 28, bold: true, color: "tx2", valign: "middle" },
     ],
   },
   {
     name: "CHART_COMMENTARY", dark: false,
     use_when: "One native chart on the left with 2-4 commentary bullets on the right.",
     placeholders: [
-      { name: "title", type: "title", ...TITLE_BOX, fontSize: 32, bold: true, color: "tx2", valign: "middle" },
+      { name: "title", type: "title", ...TITLE_BOX, fontSize: 28, bold: true, color: "tx2", valign: "middle" },
       { name: "chart", type: "chart", x: MARGIN, y: 1.65, w: 7.6, h: 4.85, color: "tx1" },
       { name: "body", type: "body", x: 8.5, y: 1.65, w: W - MARGIN - 8.5, h: 4.85, fontSize: 16, color: "tx1", valign: "middle" },
     ],
@@ -42,7 +42,7 @@ const LAYOUTS = [
     name: "TABLE", dark: false,
     use_when: "A compact comparison table (max ~6 rows x 5 columns).",
     placeholders: [
-      { name: "title", type: "title", ...TITLE_BOX, fontSize: 32, bold: true, color: "tx2", valign: "middle" },
+      { name: "title", type: "title", ...TITLE_BOX, fontSize: 28, bold: true, color: "tx2", valign: "middle" },
       { name: "table", type: "tbl", x: MARGIN, y: 1.65, w: W - 2 * MARGIN, h: 4.85, color: "tx1" },
     ],
   },
@@ -58,7 +58,7 @@ const LAYOUTS = [
     name: "SOURCES", dark: false,
     use_when: "Final slide listing sources actually used.",
     placeholders: [
-      { name: "title", type: "title", ...TITLE_BOX, fontSize: 32, bold: true, color: "tx2", valign: "middle" },
+      { name: "title", type: "title", ...TITLE_BOX, fontSize: 28, bold: true, color: "tx2", valign: "middle" },
       { name: "body", type: "body", x: MARGIN, y: 1.65, w: W - 2 * MARGIN, h: 4.9, fontSize: 14, color: "tx1", valign: "top" },
     ],
   },
