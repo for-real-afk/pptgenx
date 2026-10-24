@@ -29,15 +29,23 @@ class Tracer:
 
     def __init__(self, path: Path | None):
         self.path, self.calls, self.tokens_in, self.tokens_out = path, 0, 0, 0
+        self.models: set[str] = set()
+        self.attempts: dict[str, list[int]] = {}  # stage -> attempt number of each successful call
 
     def log(self, **rec) -> None:
         self.calls += 1
         self.tokens_in += rec.get("tokens_in") or 0
         self.tokens_out += rec.get("tokens_out") or 0
+        if rec.get("model"):
+            self.models.add(rec["model"])
         if self.path:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(rec) + "\n")
+
+    def first_attempt_rate(self, stage: str) -> float | None:
+        a = self.attempts.get(stage)
+        return None if not a else sum(1 for x in a if x == 1) / len(a)
 
     def summary(self) -> str:
         return f"{self.calls} LLM calls, {self.tokens_in} tokens in, {self.tokens_out} tokens out"
@@ -65,14 +73,17 @@ class GeminiLLM:
         """Backoff on 429/503, then fall back to the stable model. Returns (response, model used)."""
         from google.genai import errors
 
-        for m in (model, CONFIG.fallback_model):
-            for k in range(3):
+        for m in ((model,) if CONFIG.pin_models else (model, *CONFIG.fallback_models)):
+            for k in range(5 if CONFIG.pin_models else 3):
                 try:
                     return self.client.models.generate_content(model=m, contents=parts, config=cfg), m
                 except (errors.ServerError, errors.ClientError) as e:
-                    if getattr(e, "code", 0) not in (429, 500, 503):
+                    code = getattr(e, "code", 0)
+                    if code == 429 and "PerDay" in str(e):
+                        break  # daily quota for this model is gone: sleeping is pointless, try the next model
+                    if code not in (429, 500, 503):
                         raise
-                    time.sleep(2 ** k * 2)
+                    time.sleep(min(30, 2 ** k * 2))
         raise RuntimeError("Gemini unavailable after retries and fallback")
 
     def generate(self, *, stage, system, prompt, schema, images=None, vision=False):
@@ -94,7 +105,9 @@ class GeminiLLM:
                             tokens_in=getattr(um, "prompt_token_count", 0), tokens_out=getattr(um, "candidates_token_count", 0),
                             latency_s=round(time.time() - t0, 2), attempt=attempt)
             try:
-                return parse_json_as(schema, r.text or "")
+                out = parse_json_as(schema, r.text or "")
+                self.tracer.attempts.setdefault(stage, []).append(attempt)
+                return out
             except (ValidationError, ValueError) as e:
                 last_err = e
                 parts = [full, f"Your previous output was invalid: {str(e)[:500]}. Return corrected JSON only."]

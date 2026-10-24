@@ -1,47 +1,46 @@
-"""QA orchestration: build -> file QA -> render -> checks + critic -> fix -> re-render, max N rounds.
-Only slides whose spec changed are re-inspected by the critic after round 0."""
+"""QA orchestration with a never-worse guarantee.
+
+Round 0 inspects the whole deck. Each fix round handles ONE issue phase (overflow, then overlap, then contrast, ...),
+applies small diffs (trim/delete only, no net word growth), re-renders, re-inspects changed slides, and keeps the
+result only if the blocking score improved. Otherwise it reverts to the best deck and stops.
+"""
 from __future__ import annotations
 
-import hashlib
 import subprocess
 from pathlib import Path
 from typing import Protocol
 
 from deckgen.config import CONFIG
-from deckgen.llm import LLM
-from deckgen.qa import checks, soffice, validate_pptx, visual_critic
+from deckgen.llm import LLM, Tracer
+from deckgen.qa import checks, policy, soffice, validate_pptx, visual_critic
 from deckgen.qa.slide_text import content_issues, extract
 from deckgen.schemas import DeckSpec, SlideSpec
+from deckgen.schemas.edits import Edit, EditList, EditRejected, apply_edits
 from deckgen.schemas.qa import Issue, QAReport, RoundResult
 from deckgen.spec.validate_spec import load_manifest, validate_spec
 
-BLOCKING = {"high", "medium"}
-
 
 class Fixer(Protocol):
-    def fix(self, slide: SlideSpec, issues: list[Issue]) -> SlideSpec: ...
+    def propose(self, slide: SlideSpec, issues: list[Issue]) -> list[Edit]: ...
 
 
 class LLMFixer:
-    """Edits slide CONTENT to fit the layout (never the reverse): shorten, drop items, add weight."""
+    """Proposes a small diff for one slide and one issue phase. It may only shorten or delete."""
 
     def __init__(self, llm: LLM):
         self.llm = llm
 
-    def fix(self, slide: SlideSpec, issues: list[Issue]) -> SlideSpec:
+    def propose(self, slide: SlideSpec, issues: list[Issue]) -> list[Edit]:
         prompt = (
-            "Revise this slide spec to resolve the QA issues. Edit content to fit the layout: shorten text, "
-            "drop the weakest item, or add content weight to fill empty space. Keep every fact and the same id, "
-            "section, layout and source_refs.\n"
+            "Fix the issues below by editing this slide's CONTENT so it fits its layout. Allowed edits only: "
+            "replace a text field with a SHORTER version (fewer words), or delete one list item. "
+            "Never add words. Keep every key fact. Make the fewest edits that resolve the issues.\n"
+            "Paths are JSON pointers into the slide, e.g. /placeholders/body/1, /composition/items/2/body, /title.\n"
             f"SLIDE:\n{slide.model_dump_json(exclude_none=True)}\n"
-            "ISSUES:\n" + "\n".join(f"- {i.type}/{i.severity}: {i.description} (fix idea: {i.suggested_fix})" for i in issues)
+            "ISSUES:\n" + "\n".join(f"- {i.type}/{i.severity}: {i.description} (idea: {i.suggested_fix})" for i in issues)
         )
-        return self.llm.generate(stage="fixer", system="You edit slide JSON. Return the full revised slide JSON only.",
-                                 prompt=prompt, schema=SlideSpec)
-
-
-def _hash(s: SlideSpec) -> str:
-    return hashlib.sha256(s.model_dump_json().encode()).hexdigest()
+        return self.llm.generate(stage="fixer", system="You propose minimal JSON edits to a slide. Return {\"edits\": [...]}.",
+                                 prompt=prompt, schema=EditList).edits
 
 
 def build(spec: DeckSpec, brand_dir: Path, out: Path) -> None:
@@ -65,6 +64,21 @@ def inspect(deck: Path, images: list[Path], numbers: list[int], llm: LLM, brand_
     return issues
 
 
+def _evaluate(spec, brand_dir, rd, llm, changed, prev: list[Issue], consistency: bool):
+    rd.mkdir(parents=True, exist_ok=True)
+    deck = rd / "deck.pptx"
+    build(spec, brand_dir, deck)
+    images = soffice.render_deck(deck, rd)
+    fresh = inspect(deck, images, changed, llm, brand_dir, consistency=consistency)
+    # critic verdicts for slides we did not re-inspect carry over; everything else was recomputed
+    kept = [i for i in prev if i.source == "critic" and i.slide not in changed and not _is_consistency(i)]
+    return fresh + kept
+
+
+def _is_consistency(i: Issue) -> bool:
+    return i.type == "inconsistent_style"
+
+
 def run_qa(spec: DeckSpec, brand_dir: Path, run_dir: Path, llm: LLM, fixer: Fixer | None = None,
            max_rounds: int | None = None) -> tuple[DeckSpec, QAReport]:
     max_rounds = CONFIG.qa_max_rounds if max_rounds is None else max_rounds
@@ -72,47 +86,83 @@ def run_qa(spec: DeckSpec, brand_dir: Path, run_dir: Path, llm: LLM, fixer: Fixe
     if errs := validate_spec(spec, load_manifest(brand_dir)):
         report.file_errors = errs
         return spec, report
-    inspected: dict[int, str] = {}
-    issues: list[Issue] = []
-    for rnd in range(max_rounds + 1):
-        rd = run_dir / "qa" / f"round{rnd}"
-        rd.mkdir(parents=True, exist_ok=True)
-        deck = rd / "deck.pptx"
-        build(spec, brand_dir, deck)
+    all_slides = list(range(1, len(spec.slides) + 1))
+    try:
+        best_issues = _evaluate(spec, brand_dir, run_dir / "qa" / "round0", llm, all_slides, [], True)
+    except soffice.RenderError as e:
+        report.render_error = str(e)
+        return spec, report
+    best = spec
+    report.rounds.append(RoundResult(round=0, inspected_slides=all_slides, issues=best_issues, score=policy.score(best_issues)))
+
+    for rnd in range(1, max_rounds + 1):
+        nxt = policy.next_phase(best_issues)
+        if nxt is None:
+            report.stopped = "no blocking issues"
+            break
+        if fixer is None:
+            report.stopped = "blocking issues remain (no fixer)"
+            break
+        phase, hits = nxt
+        by_slide: dict[int, list[Issue]] = {}
+        for i in hits:
+            by_slide.setdefault(i.slide, []).append(i)
+        cand, changed, notes = best, [], []
+        for n, iss in sorted(by_slide.items()):
+            slide = cand.slides[n - 1]
+            try:
+                new = apply_edits(slide, fixer.propose(slide, iss))
+            except (EditRejected, ValueError) as e:
+                notes.append(f"s{n}: rejected ({str(e)[:80]})")
+                continue
+            if new != slide:
+                slides = list(cand.slides)
+                slides[n - 1] = new
+                cand = cand.model_copy(update={"slides": slides})
+                changed.append(n)
+        label = f"fix {'/'.join(sorted(phase)) or 'other'} on slides {changed}" + (f"; {'; '.join(notes)}" if notes else "")
+        if not changed:
+            report.rounds.append(RoundResult(round=rnd, inspected_slides=[], issues=best_issues, action=label + " (no applicable edit)",
+                                             accepted=False, score=policy.score(best_issues)))
+            report.stopped = "fixer produced no acceptable edit"
+            break
         try:
-            images = soffice.render_deck(deck, rd)
+            new_issues = _evaluate(cand, brand_dir, run_dir / "qa" / f"round{rnd}", llm, changed, best_issues, False)
         except soffice.RenderError as e:
             report.render_error = str(e)
             break
-        todo = [i for i, s in enumerate(spec.slides, 1) if inspected.get(i) != _hash(s)]
-        kept = [i for i in issues if i.slide not in todo and i.severity not in BLOCKING and i.source == "critic"]
-        issues = inspect(deck, images, todo, llm, brand_dir, consistency=(rnd == 0)) + ([] if rnd == 0 else kept)
-        inspected.update({i: _hash(spec.slides[i - 1]) for i in todo})
-        report.rounds.append(RoundResult(round=rnd, inspected_slides=todo, issues=issues))
-        blocking = [i for i in issues if i.severity in BLOCKING]
-        if not blocking or fixer is None or rnd == max_rounds:
+        better = policy.score(new_issues) < policy.score(best_issues)
+        report.rounds.append(RoundResult(round=rnd, inspected_slides=changed, issues=new_issues, action=label,
+                                         accepted=better, score=policy.score(new_issues)))
+        if not better:
+            report.stopped = f"round {rnd} did not improve the score; reverted to best deck"
             break
-        by_slide: dict[int, list[Issue]] = {}
-        for i in blocking:
-            by_slide.setdefault(i.slide, []).append(i)
-        slides = list(spec.slides)
-        for n, iss in by_slide.items():
-            slides[n - 1] = fixer.fix(slides[n - 1], iss)
-        spec = spec.model_copy(update={"slides": slides})
-    report.remaining = issues
+        best, best_issues = cand, new_issues
+    else:
+        report.stopped = report.stopped or "round limit reached"
+
+    report.remaining = best_issues
+    tracer = getattr(llm, "tracer", None)
+    if isinstance(tracer, Tracer):
+        report.models = sorted(tracer.models)
     (run_dir / "qa_report.json").write_text(report.model_dump_json(indent=1), encoding="utf-8")
     (run_dir / "qa_report.md").write_text(report_markdown(report), encoding="utf-8")
-    return spec, report
+    return best, report
 
 
 def report_markdown(r: QAReport) -> str:
     out = ["# QA report", ""]
     if r.render_error:
         out.append(f"RENDER FAILED: {r.render_error}")
-    out += [f"- file/spec errors: {e}" for e in r.file_errors]
+    out += [f"- file/spec error: {e}" for e in r.file_errors]
+    out.append(f"Models used: {', '.join(r.models) or 'n/a'}. Stopped: {r.stopped or 'n/a'}.")
     for rr in r.rounds:
-        out.append(f"## Round {rr.round}: inspected slides {rr.inspected_slides}, {len(rr.issues)} issues")
-        out += [f"- s{i.slide} [{i.severity}] {i.type} ({i.source}): {i.description}" for i in rr.issues]
-    out.append(f"\n## Remaining after final round: {len(r.remaining)}")
-    out += [f"- s{i.slide} [{i.severity}] {i.type}: {i.description}" for i in r.remaining]
+        out.append(f"\n## Round {rr.round}: {rr.action} -> {'kept' if rr.accepted else 'REVERTED'}; "
+                   f"blocking score {rr.score[0]} ({rr.score[1]} issues); inspected {rr.inspected_slides}")
+    blk = policy.blocking(r.remaining)
+    non = [i for i in r.remaining if i not in blk]
+    out.append(f"\n## Remaining blocking issues: {len(blk)}")
+    out += [f"- s{i.slide} [{i.severity}] {i.type} ({i.source}): {i.description}" for i in blk]
+    out.append(f"\n## Non-blocking notes (reported, never trigger fixes): {len(non)}")
+    out += [f"- s{i.slide} [{i.severity}] {i.type} ({i.source}): {i.description}" for i in sorted(non, key=lambda i: i.slide)]
     return "\n".join(out)

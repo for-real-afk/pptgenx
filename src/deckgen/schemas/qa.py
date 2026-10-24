@@ -31,6 +31,9 @@ class RoundResult(BaseModel):
     round: int
     inspected_slides: list[int]
     issues: list[Issue]
+    action: str = "initial inspection"
+    accepted: bool = True
+    score: tuple[int, int] = (0, 0)  # (weighted severity, count) of blocking issues; lower is better
 
 
 class QAReport(BaseModel):
@@ -38,3 +41,5 @@ class QAReport(BaseModel):
     remaining: list[Issue] = Field(default_factory=list)
     file_errors: list[str] = Field(default_factory=list)
     render_error: str | None = None
+    models: list[str] = Field(default_factory=list)  # models that actually served QA calls
+    stopped: str = ""

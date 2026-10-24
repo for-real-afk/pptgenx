@@ -74,7 +74,9 @@ def qa(run: str = typer.Option(None, help="run id under runs/ containing deck_sp
     (run_dir / "deck_spec.final.json").write_text(final.model_dump_json(exclude_none=True, indent=1), encoding="utf-8")
     typer.echo((run_dir / "qa_report.md").read_text(encoding="utf-8") if (run_dir / "qa_report.md").exists() else str(report))
     typer.echo(tracer.summary())
-    raise typer.Exit(1 if report.render_error or report.file_errors or any(i.severity == "high" for i in report.remaining) else 0)
+    from deckgen.qa import policy
+
+    raise typer.Exit(1 if report.render_error or report.file_errors or policy.blocking(report.remaining) else 0)
 
 
 if __name__ == "__main__":
