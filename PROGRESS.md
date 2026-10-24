@@ -46,3 +46,13 @@
 - Grounded fallback slide (findings' own claims) when 4 attempts fail; counted in the tracer (`spec_slide_fallback`).
 - Fix loop on generated WRC deck with 2 injected overflows: 6 blocking -> 0 in one round, never worse.
 - Not re-run after the new checks: Apollo, mRNA, remote work (Gemini quota). Not done: follow-up research for dropped questions, corroboration of strong claims at extraction time, following Wikipedia citations.
+
+## Round after second external review (research depth, specificity, redundancy)
+Built: follow-up searches for thin questions, Wikipedia reference following, corroboration + needs_review, evidence-bounded outline
+(+repair), specificity/attribution/title checks, spare findings in prompts, redundancy deletion, title slide from request, review-before-use
+list, quality metrics, grounded fallbacks, outvoted-findings exclusion, 2-item compositions.
+Live results on WRC with gemini-3.5-flash-lite (same topic, different runs): 14 slides (before checks, with flaws) -> 5 -> 8 -> 6 slides.
+Finding: the rule stack is stricter than a flash-lite model can satisfy on thin research; correctness went up, completeness collapsed, and
+run-to-run variance is large (v4 vs v5 on IDENTICAL research gave 8 vs 6 slides). Decks now say loudly when they are short.
+Open decisions: stronger model for spec/fact-check; which gates become warnings in the review list instead of hard fails (10-word copy rule,
+heading-name check, two-source numbers); fetch full pages for research (6000-char cap, ~8 pages per run).
