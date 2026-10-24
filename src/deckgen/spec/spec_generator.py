@@ -48,7 +48,7 @@ def _layout_menu(brand_dir: Path) -> str:
 def _limits_menu() -> str:
     A = lambda x: int(x * AIM)  # show the model targets below the hard limits: models cannot count characters exactly
     rows = [f"title: aim for at most {capacity.title_aim()} chars (one line) (content layouts, must state the message)"]
-    for kind, ns in (("cards", (3, 4, 6)), ("stats", (2, 3, 4)), ("timeline", (3, 4, 5)), ("icon_rows", (3, 4, 5))):
+    for kind, ns in (("cards", (2, 3, 4, 6)), ("stats", (2, 3, 4)), ("timeline", (3, 4, 5)), ("icon_rows", (2, 3, 4, 5))):
         for n in ns:
             rows.append(f"{kind} with {n} items: " + ", ".join(f"{k} <= {A(v)} chars" for k, v in capacity.limits(kind, n).items()))
     cmp_ = capacity.limits("comparison", 2)
@@ -67,7 +67,7 @@ def _slide_prompt(brief: Brief, o: OutlineSlide, outline: Outline, cited: list[F
     p = (
         f"STYLE GUIDE:\n{style}\n\nLAYOUTS:\n{menu}\n\nFIELD LIMITS (hard):\n{limits}\n\n"
         "HOW TO FILL THE FLAT SLIDE JSON: set layout. TITLE/SECTION: title + subtitle. CLOSING: title + bullets (3-4 "
-        "takeaways/next steps). TITLE_ONLY: comp_kind in {cards (3,4 or 6 items: icon, heading, body), icon_rows (3-5 items: "
+        "takeaways/next steps). TITLE_ONLY: comp_kind in {cards (2,3,4 or 6 items: icon, heading, body), icon_rows (2-5 items: "
         "icon, heading, body), stats (2-4 items: value, label, optional detail), timeline (3-5 items: year, heading, body), "
         "comparison (exactly 2 items: heading, bullets)}; leave unused item fields empty. CHART_COMMENTARY: chart_type "
         "(bar/column/line/pie/doughnut), chart_title, categories, series [{name, values}], bullets. TABLE: table_header + "
@@ -132,7 +132,11 @@ def generate_slide(llm: LLM, brief: Brief, o: OutlineSlide, outline: Outline, fi
     errors: list[str] = list(extra_errors or [])
     for attempt in range(1, CONFIG.spec_retries + 2):
         prompt = _slide_prompt(brief, o, outline, cited, menu, limits, style, prev, is_last, errors, spares)
-        d = llm.generate(stage="spec_slide", system=SYSTEM, prompt=prompt, schema=SlideDraft)
+        try:
+            d = llm.generate(stage="spec_slide", system=SYSTEM, prompt=prompt, schema=SlideDraft)
+        except ValueError as e:  # unparseable output counts as a failed attempt, not a crash
+            errors = [f"your output was not valid JSON for the schema ({str(e)[:160]}); return only the fields in the schema"]
+            continue
         d = d.model_copy(update={"id": f"s{o.n:02d}", "section": o.section})
         try:
             s = draft_to_slide(d)
@@ -212,14 +216,49 @@ def _fallback_slide(llm: LLM, o: OutlineSlide, cited: list[Finding], findings: d
 def generate_spec(llm: LLM, brief: Brief, outline: Outline, findings: Findings, brand_dir: Path,
                   run_dir: Path | None = None) -> DeckSpec:
     by_id = {f.id: f for f in findings.findings}
+    # a finding outvoted by what it conflicts with (fewer independent sites, or a lower source tier) is not used on slides
+    tier = {"official": 3, "archive": 3, "journalism": 2, "encyclopedia": 2, "manufacturer": 1, "other": 1}
+    outvoted = {f.id for f in findings.findings if any(
+        c in by_id and (by_id[c].corroborated_by, tier[by_id[c].source_type]) > (f.corroborated_by, tier[f.source_type]) for c in f.conflicts_with)}
+    by_id = {k: v for k, v in by_id.items() if k not in outvoted}
     slides: list[SlideSpec] = []
+    unsupported: list[dict] = []
     for o in outline.slides:
         if o.n == 1 and o.layout_hint == "TITLE":
             slides.append(title_slide(brief, outline, o))  # built from the request, never from findings
             continue
         cache = run_dir / "slides" / f"s{o.n:02d}.json" if run_dir else None
-        slides.append(generate_slide(llm, brief, o, outline, by_id, brand_dir, slides, o.n == len(outline.slides), cache))
+        if o.n == len(outline.slides):
+            # the closing synthesises the deck: it may only lean on findings already shown, best-corroborated first
+            earlier = sorted({r for sl in slides for r in sl.source_refs if r in by_id},
+                             key=lambda r: (-by_id[r].corroborated_by, by_id[r].needs_review, by_id[r].confidence != "high"))
+            o = o.model_copy(update={"finding_ids": earlier[:8] or o.finding_ids})
+        try:
+            slides.append(generate_slide(llm, brief, o, outline, by_id, brand_dir, slides, o.n == len(outline.slides), cache))
+        except SpecGenerationError as e:
+            if o.n == len(outline.slides):
+                content = [sl for sl in slides if sl.layout not in ("TITLE", "SECTION")]
+                if len(content) < 2:
+                    raise  # nothing to summarise
+                picks = [sl for sl in content if len(sl.title) <= 80][:4]
+                refs = sorted({r for sl in picks for r in sl.source_refs})
+                slides.append(SlideSpec(id=f"s{o.n:02d}", section=o.section, layout="CLOSING", title="Key takeaways",
+                                        placeholders={"body": [sl.title for sl in picks]},
+                                        speaker_notes="Built directly from the research findings: the titles of the validated slides above.",
+                                        source_refs=refs, source_caption=_caption(refs, by_id)))
+                continue
+            unsupported.append({"outline_slide": o.n, "message": o.key_message, "reason": str(e)[:300]})
+    if unsupported:  # evidence-bounded: a slide the findings cannot support is dropped, not faked
+        gone = {u["outline_slide"] for u in unsupported}
+        outline = outline.model_copy(update={"slides": [x.model_copy(update={"n": k}) for k, x in enumerate(
+            [x for x in outline.slides if x.n not in gone], 1)]})
     slides = _repair_deck(llm, brief, outline, by_id, brand_dir, slides, run_dir)
+    slides = [sl.model_copy(update={"id": f"s{k:02d}"}) for k, sl in enumerate(slides, 1)]
+    if run_dir and unsupported:
+        np = run_dir / "deck_notes.json"
+        notes = json.loads(np.read_text(encoding="utf-8")) if np.exists() else {}
+        notes["dropped_unsupported_slides"] = unsupported
+        np.write_text(json.dumps(notes, indent=1), encoding="utf-8")
     used = [by_id[r] for s in slides for r in s.source_refs if r in by_id]
     slides.append(sources_slide(len(slides) + 1, used))
     spec = DeckSpec(title=outline.deck_title, brand=brief.brand, slides=slides)

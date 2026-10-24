@@ -35,12 +35,12 @@ class Column(_Strict):
 
 class CardsComp(_Strict):
     kind: Literal["cards"]
-    items: list[Card] = Field(min_length=3, max_length=6)
+    items: list[Card] = Field(min_length=2, max_length=6)
 
 
 class IconRowsComp(_Strict):
     kind: Literal["icon_rows"]
-    items: list[Card] = Field(min_length=3, max_length=5)
+    items: list[Card] = Field(min_length=2, max_length=5)
 
 
 class StatsComp(_Strict):

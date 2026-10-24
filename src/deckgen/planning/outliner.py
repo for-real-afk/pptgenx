@@ -55,6 +55,29 @@ def validate_outline(o: Outline, brief: Brief, ids: set[str]) -> list[str]:
     return errs
 
 
+def repair_outline(o: Outline) -> tuple[Outline, list[str]]:
+    """Evidence-bounded: drop content slides the findings cannot support (fewer than 2 own findings, or the same evidence
+    as an earlier slide), keeping the title and closing slides, then renumber. Returns the outline and what was dropped."""
+    slides, dropped = list(o.slides), []
+    keep_first, keep_last = slides[0].n, slides[-1].n
+    taken: list[set[str]] = []
+    kept = []
+    for s in slides:
+        ids = set(s.finding_ids)
+        if s.n in (keep_first, keep_last):
+            kept.append(s)
+            continue
+        if len(ids) < 2:
+            dropped.append(f"slide {s.n} ({s.key_message[:60]}): fewer than 2 findings")
+        elif any(len(ids & t) > 1 for t in taken):
+            dropped.append(f"slide {s.n} ({s.key_message[:60]}): same evidence as an earlier slide")
+        else:
+            taken.append(ids)
+            kept.append(s)
+    kept = [s.model_copy(update={"n": k}) for k, s in enumerate(kept, 1)]
+    return o.model_copy(update={"slides": kept}), dropped
+
+
 def outline(llm: LLM, brief: Brief, findings: Findings, retries: int = 3) -> Outline:
     catalog = "\n".join(
         f"{f.id} [{f.confidence}, {f.corroborated_by} site(s){', SINGLE-SOURCE STRONG CLAIM' if f.needs_review else ''}] {f.claim}"
@@ -80,8 +103,11 @@ def outline(llm: LLM, brief: Brief, findings: Findings, retries: int = 3) -> Out
     for _ in range(retries + 1):
         prompt = base + (f"\n\nYour previous outline was rejected: {errs}. Fix these." if errs else "")
         o = llm.generate(stage="outline", system=SYSTEM, prompt=prompt, schema=Outline)
+        o, dropped = repair_outline(o) if len(o.slides) >= 3 else (o, [])
         errs = validate_outline(o, brief, ids)
         if not errs:
+            if dropped:
+                print(f"outline: dropped slides the evidence cannot support: {dropped}")
             return o
     raise OutlineError(f"outline invalid after {retries + 1} attempts: {errs}")
 

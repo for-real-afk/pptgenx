@@ -133,13 +133,13 @@ def test_every_composition_at_max_capacity_fits(tmp_path):
         slides.append(SlideSpec(id=f"s{len(slides) + 1:02d}", section="Cap", layout="TITLE_ONLY", title=f"Capacity {kind} {n}",
                                 composition={"kind": kind, "items": [make(lim, i) for i in range(n)]}))
 
-    for n in (3, 4, 6):
+    for n in (2, 3, 4, 6):
         add("cards", n, lambda lim, i: dict(icon="FaCogs", heading=_words(lim["heading"]), body=_words(lim["body"])))
     for n in (2, 3, 4):
         add("stats", n, lambda lim, i: dict(value="9" * lim["value"], label=_words(lim["label"]), detail=_words(lim["detail"])))
     for n in (3, 4, 5):
         add("timeline", n, lambda lim, i: dict(year="1" * lim["year"], heading=_words(lim["heading"]), body=_words(lim["body"])))
-    for n in (3, 4, 5):
+    for n in (2, 3, 4, 5):
         add("icon_rows", n, lambda lim, i: dict(icon="FaCogs", heading=_words(lim["heading"]), body=_words(lim["body"])))
     nb = capacity.comparison_max_bullets()
     add("comparison", 2, lambda lim, i: dict(heading=_words(lim["heading"]), bullets=[_words(lim["bullet"])] * nb))
@@ -196,3 +196,18 @@ def test_exhausted_retries_fall_back_to_grounded_slide():
     s = generate_slide(llm, Brief(topic="t", audience="a", slide_count=6), o, sc["outline"], fs, BRAND, [], False)
     assert llm.tracer.attempts["spec_slide_fallback"] == [2]
     assert [i.body for i in s.composition.items] == [f.claim for f in fs.values()]  # verbatim claims: grounded by construction
+
+
+def test_outline_repair_drops_unsupported_slides_and_renumbers():
+    from deckgen.planning.outliner import repair_outline
+
+    o = Outline(arc="timeline", deck_title="D", slides=[
+        OutlineSlide(n=1, section="A", purpose="p", key_message="title", layout_hint="TITLE"),
+        OutlineSlide(n=2, section="A", purpose="p", key_message="one", finding_ids=["f01", "f02"], layout_hint="TITLE_ONLY"),
+        OutlineSlide(n=3, section="A", purpose="p", key_message="thin", finding_ids=["f03"], layout_hint="TITLE_ONLY"),
+        OutlineSlide(n=4, section="B", purpose="p", key_message="same evidence", finding_ids=["f01", "f02", "f04"], layout_hint="TITLE_ONLY"),
+        OutlineSlide(n=5, section="B", purpose="p", key_message="two", finding_ids=["f05", "f06"], layout_hint="TITLE_ONLY"),
+        OutlineSlide(n=6, section="B", purpose="p", key_message="close", finding_ids=["f01"], layout_hint="CLOSING")])
+    fixed, dropped = repair_outline(o)
+    assert [s.key_message for s in fixed.slides] == ["title", "one", "two", "close"] and [s.n for s in fixed.slides] == [1, 2, 3, 4]
+    assert len(dropped) == 2

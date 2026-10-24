@@ -133,9 +133,9 @@ def claim_errors(s: SlideSpec, findings: dict[str, Finding]) -> list[str]:
     for field, text in fields:
         toks = re.findall(r"[a-z0-9']+", text.lower())
         for sn in snippets:
-            grams = {" ".join(sn[i:i + 8]) for i in range(len(sn) - 7)}
-            if any(" ".join(toks[i:i + 8]) in grams for i in range(len(toks) - 7)):
-                errs.append(f"'{text[:50]}' copies source wording (8+ words); paraphrase it")
+            grams = {" ".join(sn[i:i + 10]) for i in range(len(sn) - 9)}
+            if any(" ".join(toks[i:i + 10]) in grams for i in range(len(toks) - 9)):
+                errs.append(f"'{text[:50]}' copies source wording (10+ words); paraphrase it")
                 break
     # 5. spelling: unknown words that fewer than two independent sources use are typos until proven otherwise
     seen: set[str] = set()

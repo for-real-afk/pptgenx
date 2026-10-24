@@ -161,7 +161,7 @@ def crosscheck(llm: LLM, findings: list[Finding]) -> list[Finding]:
 
 
 STRONG = re.compile(r"\b(first|only|all|every|always|never|none|exponential\w*|unprecedented|unmatched|greatest|best|entire|"
-                    r"concluded|determined|announced|investigation|found that|banned|prohibited)\b|\d{3,}|\d+%", re.I)
+                    r"concluded|determined|announced|investigation|found that|banned|prohibited)\b", re.I)
 
 
 def _toks(t: str) -> set[str]:

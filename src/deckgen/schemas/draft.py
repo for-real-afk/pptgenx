@@ -18,7 +18,7 @@ ChartType = Literal["none", "bar", "column", "line", "pie", "doughnut"]
 
 
 class _Flat(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")  # model-facing: tolerate stray keys, validate the content instead
 
 
 class ItemDraft(_Flat):

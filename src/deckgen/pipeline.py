@@ -144,6 +144,7 @@ def review_items(spec: DeckSpec, by_id: dict, notes: dict) -> list[str]:
                 out.append(f"slide {i}, {r} ({f.source_url}): {'; '.join(why)} - \"{f.claim[:110]}\"")
         if "built directly from the research findings" in s.speaker_notes.lower():
             out.append(f"slide {i}: fallback slide built from raw findings after generation failed; wording is plain by design")
+    out += [f"slide dropped, evidence too weak ({u['message'][:70]}): {u['reason'][:140]}" for u in notes.get("dropped_unsupported_slides", [])]
     out += [f"unresolved cross-slide problem on slides {p['slides']}: {p['description']}" for p in notes.get("unresolved", [])]
     return out
 
@@ -182,7 +183,8 @@ def report_md(r: dict) -> str:
             f"- QA blocking issues remaining: {r['qa_blocking_remaining']} (stopped: {r['qa_stopped']})",
             f"- models: {r['models']}", f"- {r['llm']}",
             f"- cross-slide problems repaired on slides {r['deck_problems_repaired_slides']}; unresolved: {r['deck_problems_unresolved'] or 'none'}",
-            f"- quality: {r['quality']}",
+            f"- quality: {r['quality']}" + ("   *** DECK IS MUCH SHORTER THAN REQUESTED: the evidence was too thin; see review list and coverage ***"
+                                          if r["quality"]["slides_built"] < 0.6 * r["quality"]["slides_requested"] else ""),
             f"- REVIEW BEFORE USE ({len(r['review_before_use'])} items):"] + [f"  - {x}" for x in r["review_before_use"]] + [
             "- question coverage:"] + [f"  - {q}: {v}" for q, v in r["coverage"].items()]
     for q in r["qa_rounds"]:

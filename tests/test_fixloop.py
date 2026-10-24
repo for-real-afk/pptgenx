@@ -45,7 +45,7 @@ def test_edits_trim_ok_growth_rejected():
     with pytest.raises(EditRejected):
         apply_edits(s, [Edit(action="replace", path="/layout", text="X")])                  # structural fields are off-limits
     with pytest.raises(EditRejected):
-        apply_edits(s, [Edit(action="delete", path="/composition/items/0"), Edit(action="delete", path="/composition/items/1")])  # min 3 items
+        apply_edits(s, [Edit(action="delete", path="/composition/items/0"), Edit(action="delete", path="/composition/items/1"), Edit(action="delete", path="/composition/items/2")])  # min 2 items
 
 
 class OneEdit:
