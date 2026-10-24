@@ -20,7 +20,7 @@ WORD_RE = re.compile(r"\b[a-z]{5,}\b")
 TIER_A = {"official", "archive"}
 _spell = SpellChecker()
 _KNOWN = {"bhp", "homologation", "homologated", "turbocharger", "turbochargers", "supercharger", "drivetrain", "drivetrains",
-          "quattro", "lancia", "peugeot", "audi", "toivonen", "cresto", "balestre", "mikkola", "blomqvist", "kankkunen", "salonen"}
+          "supercar", "supercars", "rallying", "quattro", "lancia", "peugeot", "audi", "toivonen", "cresto", "balestre", "mikkola", "blomqvist", "kankkunen", "salonen"}
 NONTEXT = {"id", "section", "layout", "icon", "kind", "type", "source_refs", "source_caption", "speaker_notes", "number_format", "series"}
 HEADINGS = {"title", "heading", "year", "value", "name", "header", "categories"}
 

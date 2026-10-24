@@ -38,3 +38,11 @@
 - Gemini free tier: 20 req/day per model on some models; use `DECKGEN_MODEL=gemini-3.1-flash-lite`.
 - Writing new files: GateGuard denies the first Write per file; retry works. Long bash heredocs with odd quotes fail.
 - Not done: real PowerPoint open check (user), images, Phase 2.
+
+## Round after external review of the WRC deck
+- Title failure: titles now two lines at 28 pt (hard limit 106 chars, aim 53), exact "remove at least N chars" feedback, prompts aim at 80% of limits. Printing press now completes.
+- Seeded-claim tests: 8 deterministic seeds (number, year, name, "first", "exponential", derived "4%", "all", typo) all flagged; live LLM fact-checker flags 5/5 seeds and passes the good slide. Writing the seed test found a real gap (sentence-initial names) - fixed.
+- New checks: overclaim words, numbers/names must appear in cited findings, verbatim-copy, spelling, vendor-only/one-source numbers, cross-slide consistency (LLM), redundancy, question coverage with drop reasons. Repair pass regenerates the later slide of a problem; failures are non-fatal.
+- Grounded fallback slide (findings' own claims) when 4 attempts fail; counted in the tracer (`spec_slide_fallback`).
+- Fix loop on generated WRC deck with 2 injected overflows: 6 blocking -> 0 in one round, never worse.
+- Not re-run after the new checks: Apollo, mRNA, remote work (Gemini quota). Not done: follow-up research for dropped questions, corroboration of strong claims at extraction time, following Wikipedia citations.

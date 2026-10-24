@@ -171,3 +171,27 @@ def test_faithfulness_feedback_triggers_regeneration(tmp_path):
     assert slide.id == "s02"
     assert [c["stage"] for c in llm.calls].count("spec_slide") == 2
     assert "Audi won in 1983" in llm.calls[2]["prompt"]  # second attempt saw the fact-check feedback
+
+
+def test_exhausted_retries_fall_back_to_grounded_slide():
+    from deckgen.schemas.research import Brief
+    from deckgen.spec.spec_generator import generate_slide
+
+    fs = {f"f0{i}": Finding(id=f"f0{i}", question="q", claim=f"Group B rule number {i} limited weight to 1000 kg",
+                            evidence_snippet="weight limit", source_type="official", source_url=f"https://site{i}.test/a",
+                            retrieved_at="2026-01-01T00:00:00+00:00", confidence="high") for i in (1, 2, 3)}
+
+    def invents(prompt, images):
+        items = [ItemDraft(icon="FaBook", heading="Rule", body="Ferdinand Piech led the response.") for _ in range(3)]
+        return SlideDraft(id="s02", section="S", layout="TITLE_ONLY", title="Invented names appear here", comp_kind="icon_rows",
+                          items=items, speaker_notes="n", source_refs=["f01", "f02", "f03"])
+
+    sc = script()
+    sc["spec_slide"] = invents
+    sc["spec_fallback_labels"] = {"labels": ["Weight", "Weight", "Weight"]}
+    llm = FakeLLM(sc)
+    llm.tracer = Tracer(None)
+    o = sc["outline"].slides[1].model_copy(update={"finding_ids": ["f01", "f02", "f03"], "key_message": "Group B capped car weight"})
+    s = generate_slide(llm, Brief(topic="t", audience="a", slide_count=6), o, sc["outline"], fs, BRAND, [], False)
+    assert llm.tracer.attempts["spec_slide_fallback"] == [2]
+    assert [i.body for i in s.composition.items] == [f.claim for f in fs.values()]  # verbatim claims: grounded by construction

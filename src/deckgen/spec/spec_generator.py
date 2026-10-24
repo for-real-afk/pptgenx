@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict
 from urllib.parse import urlparse
 
 from deckgen.config import CONFIG
@@ -146,7 +148,53 @@ def generate_slide(llm: LLM, brief: Brief, o: OutlineSlide, outline: Outline, fi
         if tr:
             tr.attempts.setdefault("spec_slide_degraded", []).append(o.n)
         return generate_slide(llm, brief, plain, outline, findings, brand_dir, prev, is_last, slide_cache)
+    fb = _fallback_slide(llm, o, cited, findings, prev)
+    if fb is not None:
+        tr = getattr(llm, "tracer", None)
+        if tr:
+            tr.attempts.setdefault("spec_slide_fallback", []).append(o.n)
+        if slide_cache:
+            slide_cache.parent.mkdir(parents=True, exist_ok=True)
+            slide_cache.write_text(fb.model_dump_json(exclude_none=True, indent=1), encoding="utf-8")
+        return fb
     raise SpecGenerationError(f"slide {o.n} failed after {CONFIG.spec_retries + 1} attempts: {errors}")
+
+
+class _Labels(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    labels: list[str]
+
+
+def _fallback_slide(llm: LLM, o: OutlineSlide, cited: list[Finding], findings: dict[str, Finding], prev: list[SlideSpec]) -> SlideSpec | None:
+    """Last resort: an icon_rows slide whose bodies ARE the findings' own claims (grounded by construction).
+    Only short labels come from the model. Returns None if even this cannot pass the rules."""
+    if o.layout_hint == "CLOSING":
+        short = [f for f in sorted(cited or list(findings.values()), key=lambda f: f.confidence != "high") if len(f.claim) <= 80][:3]
+        if len(short) < 2:
+            return None
+        title = o.key_message if len(o.key_message) <= 60 and not o.key_message.endswith(".") else "Key takeaways"
+        s = SlideSpec(id=f"s{o.n:02d}", section=o.section, layout="CLOSING", title=title,
+                      placeholders={"body": [f.claim for f in short]}, speaker_notes="Built directly from the research findings.",
+                      source_refs=[f.id for f in short], source_caption=_caption([f.id for f in short], findings))
+        return s if not check_slide(s, findings, prev) else None
+    lim = capacity.limits("icon_rows", 3)
+    picks = [f for f in sorted(cited, key=lambda f: f.confidence != "high") if len(f.claim) <= lim["body"]][:3]
+    if len(picks) < 3:
+        return None
+    try:
+        labels = llm.generate(stage="spec_fallback_labels", system="You write 1-3 word labels. Output JSON only.", schema=_Labels,
+                              prompt="Write a 1-3 word label (no names or numbers unless in the claim) for each claim, in order:" + chr(10)
+                                     + chr(10).join(f"{i}. {f.claim}" for i, f in enumerate(picks, 1))).labels
+    except Exception:  # noqa: BLE001 - labels are cosmetic; never fail the slide for them
+        labels = []
+    labels = [(labels[i] if i < len(labels) else f"Finding {i + 1}")[: lim["heading"]] for i in range(3)]
+    icons = ["FaBook", "FaFlagCheckered", "FaHistory"]
+    title = o.key_message if len(o.key_message) <= capacity.title_limit() and not o.key_message.endswith(".") else o.section
+    s = SlideSpec(id=f"s{o.n:02d}", section=o.section, layout="TITLE_ONLY", title=title,
+                  composition={"kind": "icon_rows", "items": [dict(icon=icons[i], heading=labels[i], body=picks[i].claim) for i in range(3)]},
+                  speaker_notes="Built directly from the research findings: " + " ".join(f.claim for f in picks),
+                  source_refs=[f.id for f in picks], source_caption=_caption([f.id for f in picks], findings))
+    return s if not check_slide(s, findings, prev) else None
 
 
 def generate_spec(llm: LLM, brief: Brief, outline: Outline, findings: Findings, brand_dir: Path,
@@ -182,12 +230,16 @@ def _repair_deck(llm: LLM, brief: Brief, outline: Outline, by_id: dict[str, Find
             others = [n for n in p.slides if n != target]
             fixes.setdefault(target, []).append(f"{p.kind} with slide(s) {others}: {p.description}. Resolve it using only the findings.")
     by_n = {o.n: o for o in outline.slides}
+    failed: list[int] = []
     for n, errs in fixes.items():
         cache = run_dir / "slides" / f"s{n:02d}.json" if run_dir else None
-        slides[n - 1] = generate_slide(llm, brief, by_n[n], outline, by_id, brand_dir, slides[:n - 1], n == len(slides), cache, errs)
-    remaining = _deck_problems(llm, slides, brief, outline, by_id) if fixes else problems
+        try:
+            slides[n - 1] = generate_slide(llm, brief, by_n[n], outline, by_id, brand_dir, slides[:n - 1], n == len(slides), cache, errs)
+        except SpecGenerationError:
+            failed.append(n)  # keep the original slide; the problem stays listed as unresolved
+    remaining = _deck_problems(llm, slides, brief, outline, by_id) if set(fixes) - set(failed) else problems
     if run_dir:
-        notes = {"problems_found": [p.model_dump() for p in problems], "repaired_slides": sorted(fixes),
+        notes = {"problems_found": [p.model_dump() for p in problems], "repaired_slides": sorted(set(fixes) - set(failed)), "repair_failed_slides": failed,
                  "unresolved": [p.model_dump() for p in remaining]}
         (run_dir / "deck_notes.json").write_text(json.dumps(notes, indent=1), encoding="utf-8")
     return slides

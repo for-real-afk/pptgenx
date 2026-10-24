@@ -84,7 +84,13 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
             qa_report = QAReport.model_validate_json((run_dir / "qa_report.json").read_text(encoding="utf-8"))
 
     deck = run_dir / "deck.pptx"
-    fix_loop.build(spec, brand_dir, deck)
+    try:
+        fix_loop.build(spec, brand_dir, deck)
+    except RuntimeError as e:
+        if "EBUSY" not in str(e) and "locked" not in str(e):
+            raise
+        deck = run_dir / f"deck-{time.strftime('%H%M%S')}.pptx"  # the old deck is open in PowerPoint: do not fight the lock
+        fix_loop.build(spec, brand_dir, deck)
     images: list[Path] = []
     render_error = None
     try:
