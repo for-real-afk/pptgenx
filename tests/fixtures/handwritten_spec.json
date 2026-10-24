@@ -1,0 +1,53 @@
+{
+  "title": "The golden era of WRC Group B (1980s)",
+  "brand": "default_v1",
+  "slides": [
+    {"id": "s01", "section": "Opening", "layout": "TITLE", "title": "The golden era of WRC Group B",
+     "placeholders": {"subtitle": "Fixture deck: rules, machines, and the end of an era, 1982-1986"},
+     "speaker_notes": "Hand-written fixture used to test the renderer. Not researched content."},
+    {"id": "s02", "section": "Origins", "layout": "TITLE_ONLY", "title": "Group B rules invited near-unlimited engineering",
+     "composition": {"kind": "stats", "items": [
+       {"value": "200", "label": "Road cars to homologate", "detail": "Minimum build run for a Group B car"},
+       {"value": "20", "label": "Evolution models", "detail": "Extra cars allowed for each evolution"},
+       {"value": "1982", "label": "Group B debuts", "detail": "Replaced Groups 3 and 4"}]},
+     "source_caption": "Source: fixture data (not researched)",
+     "speaker_notes": "Stat callouts: figures are placeholders for the fixture."},
+    {"id": "s03", "section": "Origins", "layout": "TITLE_ONLY", "title": "Four ideas defined the machines",
+     "composition": {"kind": "cards", "items": [
+       {"icon": "FaCarSide", "heading": "All-wheel drive", "body": "Audi's Quattro changed what a rally car could be."},
+       {"icon": "FaBolt", "heading": "Turbocharging", "body": "Boost pushed outputs far past road-car norms."},
+       {"icon": "FaFeatherAlt", "heading": "Light bodies", "body": "Composite panels kept mass low."},
+       {"icon": "FaCogs", "heading": "Mid-engine layouts", "body": "Balance improved with the engine behind the driver."}]},
+     "source_caption": "Source: fixture data (not researched)"},
+    {"id": "s04", "section": "Machines", "layout": "CHART_COMMENTARY", "title": "Power climbed past 400 hp across the field",
+     "placeholders": {"body": ["Audi led on peak output", "Lancia paired a supercharger with a turbo", "Peugeot balanced power and agility"]},
+     "chart": {"type": "bar", "title": "Approximate peak power (hp)", "categories": ["Audi S1 E2", "Lancia S4", "Peugeot 205 T16 E2", "Ford RS200", "MG Metro 6R4"],
+               "series": [{"name": "hp", "values": [500, 480, 450, 450, 410]}]},
+     "source_caption": "Source: fixture data (approximate, not researched)"},
+    {"id": "s05", "section": "Machines", "layout": "TITLE_ONLY", "title": "Rivalries shaped each season",
+     "composition": {"kind": "comparison", "items": [
+       {"heading": "Audi Sport", "bullets": ["Pioneered four-wheel drive", "Front-engine layout", "Early dominance"]},
+       {"heading": "Peugeot Talbot Sport", "bullets": ["Mid-engine 205 T16", "Balanced handling", "Won back-to-back titles"]}]},
+     "source_caption": "Source: fixture data (not researched)"},
+    {"id": "s06", "section": "Legacy", "layout": "TITLE_ONLY", "title": "Safety failures ended the class in 1986",
+     "composition": {"kind": "timeline", "items": [
+       {"year": "1982", "heading": "Group B begins", "body": "New top-tier rules start."},
+       {"year": "1985", "heading": "Peak speeds", "body": "Evolution cars reach the field."},
+       {"year": "May 1986", "heading": "Tour de Corse", "body": "Fatal crash prompts alarm."},
+       {"year": "Late 1986", "heading": "Class banned", "body": "FIA drops Group B for 1987."}]},
+     "source_caption": "Source: fixture data (not researched)"},
+    {"id": "s07", "section": "Legacy", "layout": "TITLE_ONLY", "title": "Its legacy still shapes rallying",
+     "composition": {"kind": "icon_rows", "items": [
+       {"icon": "FaShieldAlt", "heading": "Safety", "body": "Stricter limits on power and car design followed."},
+       {"icon": "FaFlagCheckered", "heading": "Group A", "body": "Production-based rules replaced Group B."},
+       {"icon": "FaHeart", "heading": "Culture", "body": "Fans still celebrate the era in games and film."}]},
+     "source_caption": "Source: fixture data (not researched)"},
+    {"id": "s08", "section": "Legacy", "layout": "TABLE", "title": "Five cars summarize the field",
+     "table": {"header": ["Car", "Maker", "Layout"], "rows": [["Quattro S1", "Audi", "Front engine, AWD"], ["037", "Lancia", "Mid engine, RWD"], ["Delta S4", "Lancia", "Mid engine, AWD"], ["205 T16", "Peugeot", "Mid engine, AWD"], ["RS200", "Ford", "Mid engine, AWD"]]},
+     "source_caption": "Source: fixture data (not researched)"},
+    {"id": "s09", "section": "Close", "layout": "CLOSING", "title": "What to remember",
+     "placeholders": {"body": ["Rules invited radical engineering", "Speed outran safety", "The legacy lives on in modern rally rules"]}},
+    {"id": "s10", "section": "Close", "layout": "SOURCES", "title": "Sources",
+     "placeholders": {"body": ["Fixture deck: no external sources."]}}
+  ]
+}

@@ -1,0 +1,137 @@
+{
+  "layouts": [
+    {
+      "name": "TITLE",
+      "dark": true,
+      "use_when": "Opening slide: deck title and one-line subtitle.",
+      "placeholders": [
+        {
+          "name": "title",
+          "type": "title",
+          "font_size": 48,
+          "max_chars": 62
+        },
+        {
+          "name": "subtitle",
+          "type": "body",
+          "font_size": 20,
+          "max_chars": 225
+        }
+      ]
+    },
+    {
+      "name": "SECTION",
+      "dark": true,
+      "use_when": "Section divider between major parts of a long deck.",
+      "placeholders": [
+        {
+          "name": "title",
+          "type": "title",
+          "font_size": 40,
+          "max_chars": 37
+        },
+        {
+          "name": "subtitle",
+          "type": "body",
+          "font_size": 18,
+          "max_chars": 252
+        }
+      ]
+    },
+    {
+      "name": "TITLE_ONLY",
+      "dark": false,
+      "use_when": "Default content frame; compose cards, stats, timeline, comparison or icon rows below the title.",
+      "placeholders": [
+        {
+          "name": "title",
+          "type": "title",
+          "font_size": 32,
+          "max_chars": 54
+        }
+      ]
+    },
+    {
+      "name": "CHART_COMMENTARY",
+      "dark": false,
+      "use_when": "One native chart on the left with 2-4 commentary bullets on the right.",
+      "placeholders": [
+        {
+          "name": "title",
+          "type": "title",
+          "font_size": 32,
+          "max_chars": 54
+        },
+        {
+          "name": "chart",
+          "type": "chart",
+          "font_size": null,
+          "max_chars": null
+        },
+        {
+          "name": "body",
+          "type": "body",
+          "font_size": 16,
+          "max_chars": 684
+        }
+      ]
+    },
+    {
+      "name": "TABLE",
+      "dark": false,
+      "use_when": "A compact comparison table (max ~6 rows x 5 columns).",
+      "placeholders": [
+        {
+          "name": "title",
+          "type": "title",
+          "font_size": 32,
+          "max_chars": 54
+        },
+        {
+          "name": "table",
+          "type": "tbl",
+          "font_size": null,
+          "max_chars": null
+        }
+      ]
+    },
+    {
+      "name": "CLOSING",
+      "dark": true,
+      "use_when": "Conclusion and next steps; dark bookend.",
+      "placeholders": [
+        {
+          "name": "title",
+          "type": "title",
+          "font_size": 36,
+          "max_chars": 48
+        },
+        {
+          "name": "body",
+          "type": "body",
+          "font_size": 18,
+          "max_chars": 1092
+        }
+      ]
+    },
+    {
+      "name": "SOURCES",
+      "dark": false,
+      "use_when": "Final slide listing sources actually used.",
+      "placeholders": [
+        {
+          "name": "title",
+          "type": "title",
+          "font_size": 32,
+          "max_chars": 54
+        },
+        {
+          "name": "body",
+          "type": "body",
+          "font_size": 12,
+          "max_chars": 3480
+        }
+      ]
+    }
+  ]
+}

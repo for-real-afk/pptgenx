@@ -1,0 +1,20 @@
+{
+  "name": "DeckgenDefault",
+  "headFontFace": "Cambria",
+  "bodyFontFace": "Calibri",
+  "footerText": "deckgen",
+  "colors": {
+    "dk1": "1A1D23",
+    "lt1": "FFFFFF",
+    "dk2": "10213B",
+    "lt2": "F1F3F6",
+    "accent1": "1F3A5F",
+    "accent2": "E4572E",
+    "accent3": "6B7A8F",
+    "accent4": "F2A541",
+    "accent5": "3E8E7E",
+    "accent6": "8E5572",
+    "hlink": "1F6FEB",
+    "folHlink": "6B7A8F"
+  }
+}
