@@ -59,6 +59,16 @@ def redundancy(spec: DeckSpec, threshold: float = 0.6) -> list[Problem]:
     return out
 
 
+def shared_evidence(spec: DeckSpec) -> list[Problem]:
+    """Two content slides resting on the same findings make the same point twice."""
+    out = []
+    content = [(i, set(s.source_refs)) for i, s in enumerate(spec.slides, 1) if s.layout not in SKIP]
+    for (i, a), (j, b) in combinations(content, 2):
+        if len(a & b) >= 2:
+            out.append(Problem(kind="redundancy", slides=[i, j], description=f"slides {i} and {j} rest on the same findings {sorted(a & b)}"))
+    return out
+
+
 def coverage(brief: Brief, findings: list[Finding], spec: DeckSpec) -> dict[str, str]:
     """question -> 'covered by slides [..]' or the reason it is not on any slide."""
     where = {}

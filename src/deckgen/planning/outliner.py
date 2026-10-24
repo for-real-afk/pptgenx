@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from itertools import combinations
 from pathlib import Path
 
 from deckgen.llm import LLM
 from deckgen.planning.arcs import ARCS
 from deckgen.schemas.research import Brief, Findings, Outline
 
+MIN_SLIDES = 5
 SYSTEM = "You are an editor who structures presentation decks. Output JSON only."
 
 
@@ -19,8 +21,16 @@ def validate_outline(o: Outline, brief: Brief, ids: set[str]) -> list[str]:
     errs = []
     if o.arc not in ARCS:
         errs.append(f"arc must be one of {sorted(ARCS)}")
-    if len(o.slides) != want:
-        errs.append(f"need exactly {want} slides (the Sources slide is added automatically), got {len(o.slides)}")
+    if not MIN_SLIDES <= len(o.slides) <= want:
+        errs.append(f"need between {MIN_SLIDES} and {want} slides (the Sources slide is added automatically), got {len(o.slides)}")
+    content = [s for s in o.slides if 1 < s.n < len(o.slides)]
+    for a, b in combinations(content, 2):
+        shared = set(a.finding_ids) & set(b.finding_ids)
+        if len(shared) > 1:
+            errs.append(f"slides {a.n} and {b.n} rest on the same findings {sorted(shared)}: merge them or give each its own evidence")
+    for s in content:
+        if len(set(s.finding_ids)) < 2:
+            errs.append(f"slide {s.n} needs at least 2 distinct findings")
     if [s.n for s in o.slides] != list(range(1, len(o.slides) + 1)):
         errs.append("slide numbers must be 1..N in order")
     seen: list[str] = []
@@ -46,19 +56,25 @@ def validate_outline(o: Outline, brief: Brief, ids: set[str]) -> list[str]:
 
 
 def outline(llm: LLM, brief: Brief, findings: Findings, retries: int = 3) -> Outline:
-    catalog = "\n".join(f"{f.id} [{f.confidence}] {f.claim}" for f in findings.findings)
+    catalog = "\n".join(
+        f"{f.id} [{f.confidence}, {f.corroborated_by} site(s){', SINGLE-SOURCE STRONG CLAIM' if f.needs_review else ''}] {f.claim}"
+        for f in findings.findings)
     arcs = "\n".join(f"- {k}: {v}" for k, v in ARCS.items())
     ids = {f.id for f in findings.findings}
     want = brief.slide_count - 1
     base = (
         f"Topic: {brief.topic}\nAudience: {brief.audience}\nObjective: {brief.objective}\n\n"
         f"ARCS:\n{arcs}\n\nFINDINGS (the only facts you may build on):\n{catalog}\n\n"
-        f"Choose the best arc and write a slide-by-slide outline of exactly {want} slides (a Sources slide is appended "
-        "automatically). Slide 1 has layout_hint TITLE; the last slide has layout_hint CLOSING (conclusion and next steps). "
+        f"Choose the best arc and write a slide-by-slide outline of AT MOST {want} slides (a Sources slide is appended "
+        f"automatically). {want} is a maximum, not a target: build only as many slides as the evidence supports, at least "
+        f"{MIN_SLIDES}; padding thin evidence into filler slides is worse than a shorter deck. Slide 1 has layout_hint TITLE; the last slide has layout_hint CLOSING (conclusion and next steps). "
         "Other slides use layout_hint TITLE_ONLY (default; cards, stats, timeline, comparison or icon rows), CHART_COMMENTARY or TABLE; no section dividers. Each slide: n, section "
         "(contiguous groups, 3-5 sections total), purpose, key_message (one sentence stating the point), finding_ids "
         "(2-4 ids that support it; use the ids exactly). Prefer findings from at least two different websites for any slide with numbers or superlatives. Cover the findings broadly; prefer high-confidence ones; use a "
-        "CHART_COMMENTARY slide only where findings hold comparable numbers. Do not repeat the same message."
+        "CHART_COMMENTARY slide only where findings hold comparable numbers. Each content slide needs 2-4 findings that no other slide relies on "
+        "(two slides may share at most one finding); never split one point over two slides. The closing slide must add "
+        "something forward-looking (implications, what to watch, next steps) and must not recap earlier slides; its findings "
+        "may repeat earlier ones. Avoid findings marked SINGLE-SOURCE STRONG CLAIM unless nothing else covers the point."
     )
     errs: list[str] = []
     for _ in range(retries + 1):

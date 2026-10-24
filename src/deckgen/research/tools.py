@@ -51,12 +51,12 @@ class Budget:
             raise BudgetExhausted("wall-clock budget")
         if self.tool_calls >= self.max_tool_calls:
             raise BudgetExhausted("tool-call budget")
-        if kind == "fetch_page" and self.pages >= self.max_pages:
+        if kind in ("fetch_page", "references") and self.pages >= self.max_pages:
             raise BudgetExhausted("page budget")
         if not cached and self.api_calls >= self.max_api_calls:
             raise BudgetExhausted("external API call cap")
         self.tool_calls += 1
-        self.pages += kind == "fetch_page"
+        self.pages += kind in ("fetch_page", "references")
         self.cache_hits += cached
         self.api_calls += not cached
 
@@ -84,6 +84,18 @@ class TavilySearch:
 
 
 class HttpFetcher:
+    def references(self, url: str) -> list[str]:
+        """External links from a Wikipedia article's reference list (the primary sources behind its claims)."""
+        r = httpx.get(url, timeout=20, follow_redirects=True, headers={"User-Agent": UA})
+        r.raise_for_status()
+        doc = lhtml.fromstring(r.content[:2_000_000])
+        hrefs = doc.xpath("//ol[contains(@class,'references')]//a[starts-with(@href,'http') and contains(@class,'external')]/@href")
+        out: list[str] = []
+        for h in hrefs:
+            if not any(b in h for b in ("wikipedia.org", "wikimedia.org", "wikidata.org", "web.archive.org")) and h not in out:
+                out.append(h)
+        return out
+
     def fetch(self, url: str) -> str:
         r = httpx.get(url, timeout=20, follow_redirects=True, headers={"User-Agent": UA})
         r.raise_for_status()
@@ -121,3 +133,7 @@ class ResearchTools:
 
     def fetch_page(self, url: str) -> str:
         return self._cached("fetch_page", {"url": url}, lambda: self._fetch.fetch(url))
+
+    def references(self, url: str) -> list[str]:
+        fn = getattr(self._fetch, "references", None)
+        return self._cached("references", {"url": url}, lambda: fn(url) if fn else [])

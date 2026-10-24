@@ -69,8 +69,8 @@ def test_injection_in_page_triggers_nothing():
     llm, tools, search = make(prompts)
     res = run_research(llm, tools, brief(2))
     # only the planned queries ran; nothing from the page became a tool call
-    assert search.queries == ["group b homologation rules"]  # second identical query served from cache
-    assert [t for t, _ in tools.log] == ["web_search", "web_search"]
+    assert set(search.queries) == {"group b homologation rules"}  # only the planned query; repeats come from the cache
+    assert {t for t, _ in tools.log} == {"web_search"}              # no fetch_page, nothing the page asked for
     assert not any("attacker" in str(a) or "evil.test" in str(a) for _, a in tools.log)
     # the model only ever saw redacted, quoted text
     assert prompts and all("IGNORE ALL" not in p and "pirate" not in p and REDACTION in p and "<source url=" in p for p in prompts)
@@ -107,3 +107,69 @@ def test_meta_findings_filtered_and_source_types():
     assert source_type("https://en.wikipedia.org/wiki/Group_B") == "encyclopedia"
     assert source_type("https://www.fia.com/x") == "official"
     assert source_type("https://random.example/x") == "other"
+
+
+def _f(i, claim, url, typ="journalism"):
+    from deckgen.schemas.research import Finding
+
+    return Finding(id=f"f{i:02d}", question="q", claim=claim, evidence_snippet="s", source_type=typ, source_url=url,
+                   retrieved_at="2026-01-01T00:00:00+00:00", confidence="high")
+
+
+def test_corroboration_and_single_source_strong_claims():
+    from deckgen.research.agent import corroborate
+
+    fs = corroborate([
+        _f(1, "The FIA banned Group B cars from the 1987 season after the fatal crash", "https://a.com/x"),
+        _f(2, "FIA banned Group B cars for the 1987 season following the fatal accident", "https://b.org/y"),
+        _f(3, "FISA concluded that Group B cars were too fast for human reaction times", "https://c.net/z"),
+        _f(4, "Group B allowed 200 homologation units", "https://fia.com/q", "official"),
+    ])
+    assert fs[0].corroborated_by == 2 and not fs[0].needs_review and not fs[1].needs_review
+    assert fs[2].needs_review and fs[2].review_reason          # single non-official source, strong wording
+    assert not fs[3].needs_review                              # official source: no flag
+
+
+def test_thin_questions_get_a_follow_up_search():
+    llm_queries = []
+
+    def query(prompt, images):
+        q = "authoritative rewording" if "A first search found little" in prompt else "first wording"
+        llm_queries.append(q)
+        return QueryPlan(queries=[q])
+
+    class Pick(FakeSearch):
+        def search(self, query, max_results):
+            self.queries.append(query)
+            return [] if query == "first wording" else [SearchResult(title="t", url="https://www.wrc.com/found", snippet="s", content=PAGE.replace(INJECTION, ""), score=1)]
+
+    llm = FakeLLM({"research_query": query, "research_extract": lambda p, i: RawFindings(findings=[RawFinding(
+        claim="Group B required 200 road cars from 1982", evidence_snippet="200 cars", confidence="high")]),
+        "research_crosscheck": ConflictReport(links=[])})
+    search = Pick()
+    tools = ResearchTools(search, NoFetch(), Budget(40, 20, 120, 40))
+    res = run_research(llm, tools, brief(1))
+    assert "first wording" in search.queries and "authoritative rewording" in search.queries
+    assert res.findings and res.stats["followup_questions"] == 1
+
+
+def test_wikipedia_references_are_followed_but_junk_is_not():
+    class Fetch:
+        def references(self, url):
+            return ["https://www.fia.com/history/group-b", "https://forum.example.com/thread/1"]
+
+        def fetch(self, url):
+            assert "forum" not in url
+            return PAGE.replace(INJECTION, "")
+
+    class WikiSearch(FakeSearch):
+        def search(self, query, max_results):
+            return [SearchResult(title="Group B", url="https://en.wikipedia.org/wiki/Group_B", snippet="s", content=PAGE.replace(INJECTION, ""), score=1)]
+
+    llm = FakeLLM({"research_query": QueryPlan(queries=["group b"]), "research_extract": lambda p, i: RawFindings(findings=[RawFinding(
+        claim="Group B required 200 road cars", evidence_snippet="200 cars", confidence="high")]),
+        "research_crosscheck": ConflictReport(links=[])})
+    tools = ResearchTools(WikiSearch(), Fetch(), Budget(40, 20, 120, 40))
+    run_research(llm, tools, brief(1))
+    fetched = [a["url"] for t, a in tools.log if t == "fetch_page"]
+    assert "https://www.fia.com/history/group-b" in fetched and not any("forum" in u for u in fetched)

@@ -40,6 +40,9 @@ class Finding(_M):
     confidence: Literal["low", "medium", "high"]
     conflicts_with: list[str] = Field(default_factory=list)  # ids of findings that disagree
     flagged: bool = False  # source text contained suspected injected instructions
+    corroborated_by: int = 1  # independent websites stating the same thing (including this one)
+    needs_review: bool = False  # strong claim resting on one non-official source: attribute it, and a human should check
+    review_reason: str = ""
 
 
 class Findings(_M):

@@ -27,7 +27,7 @@ def run_all(golden: Path, only: str | None = None) -> int:
             rows.append({"topic": t["topic"][:36], "slides": rep["slides"], "valid@1": rep["first_attempt_rate"].get("spec_slide_valid"),
                          "degraded": rep["first_attempt_rate"].get("spec_slide_degraded"), "unsourced": len(rep["unsourced_slides"]),
                          "bad_layouts": len(rep["invalid_layouts"]), "file_ok": not rep["file_errors"],
-                         "qa_rounds": len(rep["qa_rounds"]), "blocking_left": rep["qa_blocking_remaining"], "hard_fail": hard})
+                         "quality": rep["quality"], "review_items": len(rep["review_before_use"]), "qa_rounds": len(rep["qa_rounds"]), "blocking_left": rep["qa_blocking_remaining"], "hard_fail": hard})
             failed |= hard
         except Exception as e:  # noqa: BLE001 - an eval run must report, not crash the batch
             (run_dir / "eval_error.txt").write_text(traceback.format_exc(), encoding="utf-8")

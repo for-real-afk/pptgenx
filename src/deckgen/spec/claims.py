@@ -57,8 +57,49 @@ def _domain_root(url: str) -> str:
     return ".".join(host.split(".")[-2:])
 
 
-def claim_errors(s: SlideSpec, findings: dict[str, Finding]) -> list[str]:
+ATTRIBUTION = re.compile(r"\b(according to|reportedly|reported|reports?|claims?|claimed|said|says|described|per|as stated by|"
+                         r"cited by|suggests?|suggested)\b", re.I)
+NUMBER_WORDS = ("hundred", "thousand", "million", "billion", "dozen")
+
+
+def _is_concrete(text: str) -> bool:
+    """A concrete statement carries a number, date or a proper name (a capitalised word that is not the first word)."""
+    return bool(re.search(r"\d", text)) or bool(re.search(r"(?<!^)(?<![.!?]\s)\b[A-Z][a-zA-Z]{2,}", text))
+
+
+def quality_errors(s: SlideSpec, findings: dict[str, Finding]) -> list[str]:
+    """Slide-quality rules that grounding checks reward the opposite of: vagueness, unattributed shaky claims, loose titles."""
     errs: list[str] = []
+    cited = [findings[r] for r in s.source_refs if r in findings]
+    low = " ".join(f"{f.claim} {f.evidence_snippet}" for f in cited).lower()
+    fields = visible_fields(s)
+    if s.composition and s.composition.kind == "timeline":
+        for it in s.composition.items:
+            if not re.search(r"\d", it.year):
+                errs.append(f"timeline label '{it.year}' must be a year or date, not a word; use another composition if there are no dates")
+    bodies = [t for f, t in fields if f in ("body", "bullets", "detail", "label") and len(t.split()) >= 4]
+    if len(bodies) >= 3:
+        vague = [t for t in bodies if not _is_concrete(t)]
+        if len(vague) * 2 > len(bodies):
+            errs.append(f"{len(vague)} of {len(bodies)} statements contain no number, date or name ('{vague[0][:50]}'): replace filler with "
+                        "concrete facts from the findings (spare findings are listed in the prompt)")
+    shaky = [f for f in cited if f.needs_review]
+    if shaky and not any(ATTRIBUTION.search(t) for _, t in fields):
+        errs.append(f"findings {[f.id for f in shaky]} rest on one non-official source: attribute them in the text "
+                    "('X reportedly ...', 'according to <site>') or leave them out")
+    title = s.title.lower()
+    body_nums = " ".join(t for f, t in fields if f != "title")
+    for w in NUMBER_WORDS:
+        if re.search(rf"\b{w}\b", title) and not re.search(rf"\b{w}\b", low):
+            errs.append(f"title says '{w}' but the cited findings do not; state only what the cards and findings support")
+    for tok in re.findall(r"\d[\d,]*", s.title):
+        if tok.replace(",", "") not in body_nums.replace(",", "") and tok.replace(",", "") not in low.replace(",", ""):
+            errs.append(f"title number {tok} is not supported by the cards below it or the findings")
+    return errs
+
+
+def claim_errors(s: SlideSpec, findings: dict[str, Finding]) -> list[str]:
+    errs: list[str] = quality_errors(s, findings)
     cited = _cited_text(s, findings)
     low = cited.lower()
     fields = visible_fields(s)

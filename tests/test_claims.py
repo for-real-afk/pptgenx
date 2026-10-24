@@ -1,6 +1,7 @@
 """Seeded-bad-slide tests: the claim checks must FLAG every known-bad edit of a known-good slide.
 A check that has never failed on a bad slide proves nothing; these are the known-bad slides."""
 import pytest
+from pathlib import Path
 
 from deckgen.llm import FakeLLM
 from deckgen.schemas import DeckSpec, SlideSpec
@@ -124,3 +125,67 @@ def test_live_fact_checker_flags_every_seed_and_passes_the_good_slide():
     assert unsupported_statements(llm, slide(), cited) == [], "false positive on the known-good slide"
     missed = [k for k, s in LLM_SEEDS.items() if not unsupported_statements(llm, s, cited)]
     assert missed == [], f"fact-checker missed: {missed}"
+
+
+# ---- slide quality: specificity, attribution, title support, timeline labels, redundancy deletion, title slide ----
+def test_filler_cards_are_flagged_and_concrete_ones_pass():
+    filler = bad(**{"composition.items.0.body": "The drive architecture established a lasting competitive standard.",
+                    "composition.items.1.body": "Rivals were forced to adopt similar technology quickly.",
+                    "composition.items.2.body": "This changed the entire competitive landscape for good."})
+    assert any("no number, date or name" in e for e in claim_errors(filler, FINDINGS))
+    assert not any("no number, date or name" in e for e in claim_errors(slide(), FINDINGS))
+
+
+def test_single_source_strong_claim_needs_attribution():
+    shaky = {**FINDINGS, "f02": FINDINGS["f02"].model_copy(update={"needs_review": True, "review_reason": "single source"})}
+    assert any("attribute" in e for e in claim_errors(slide(), shaky))
+    attributed = bad(**{"composition.items.2.body": "According to WRC.com, Hannu Mikkola won the 1983 drivers title."})
+    assert not any("attribute" in e for e in claim_errors(attributed, shaky))
+
+
+def test_title_numbers_must_be_supported():
+    assert any("title says 'hundred'" in e for e in claim_errors(bad(title="Over five hundred horsepower defined Group B"), FINDINGS))
+    assert any("title number" in e for e in claim_errors(bad(title="Group B demanded 2000 cars"), FINDINGS))
+
+
+def test_timeline_label_must_be_a_date():
+    s = slide(composition={"kind": "timeline", "items": [
+        {"year": "Intro", "heading": "Start", "body": "Group B began in 1982."},
+        {"year": "1983", "heading": "Title", "body": "Hannu Mikkola won in 1983."},
+        {"year": "1986", "heading": "End", "body": "Group B ended in 1986."}]}, source_refs=["f01", "f02"])
+    assert any("must be a year or date" in e for e in claim_errors(s, {**FINDINGS, "f01": FINDINGS["f01"].model_copy(
+        update={"claim": FINDINGS["f01"].claim + " ended in 1986 and began 1982"})}))
+
+
+def test_redundant_slides_are_deleted_not_rewritten(tmp_path):
+    from deckgen.schemas.research import Outline, OutlineSlide
+    from deckgen.spec.spec_generator import _repair_deck
+
+    vocab = "amber basil cedar delta ember fjord glint haven ivory jaded kappa lunar mango noble ocean pearl quartz raven sable tulip umber vivid wheat xenon yarrow zephyr".split()
+
+    def mk(i, refs):
+        items = [{"icon": "FaBook", "heading": f"Head {k}", "body": f"{vocab[(i * 4 + k) % 26]} {vocab[(i * 4 + k + 7) % 26]} {vocab[(i * 4 + k + 13) % 26]} {vocab[(i * 4 + k + 19) % 26]} 1982"} for k in range(3)]
+        return slide(id=f"s{i:02d}", source_refs=refs, title=f"Distinct message number {i} here", composition={"kind": "icon_rows", "items": items})
+
+    slides = [slide(id="s01", layout="TITLE", title="T", composition=None, source_refs=[])] + \
+             [mk(i, r) for i, r in zip(range(2, 8), (["f01", "f02"], ["f01", "f02"], ["f03"], ["f04"], ["f05"], ["f06"]))] + \
+             [slide(id="s08", layout="CLOSING", title="Next", composition=None, placeholders={"body": ["Watch the rules"]}, source_refs=["f01"])]
+    outline = Outline(arc="timeline", deck_title="D", slides=[OutlineSlide(n=i, section="S", purpose="p", key_message="k") for i in range(1, 9)])
+    llm = FakeLLM({"deck_consistency": {"problems": []}})
+    by_id = {f"f0{i}": FINDINGS["f01"].model_copy(update={"id": f"f0{i}"}) for i in range(1, 7)}
+    out = _repair_deck(llm, Brief(topic="t", audience="a", slide_count=9), outline, by_id, Path("brand/default_v1"), slides, tmp_path)
+    assert len(out) == len(slides) - 1 and [s.id for s in out] == [f"s{k:02d}" for k in range(1, len(out) + 1)]
+    notes = __import__("json").loads((tmp_path / "deck_notes.json").read_text())
+    assert notes["deleted_slides"] == [3]                      # the later of the two slides sharing f01+f02
+    assert out[-1].layout == "CLOSING" and out[0].layout == "TITLE"
+
+
+def test_title_slide_comes_from_the_request_not_findings():
+    from deckgen.schemas.research import Outline, OutlineSlide
+    from deckgen.spec.spec_generator import title_slide
+
+    brief = Brief(topic="The golden era of WRC Group B (1980s)", audience="motorsport enthusiasts", slide_count=14,
+                  objective="Show how Group B rose and why it ended")
+    o = Outline(arc="timeline", deck_title="Group B", slides=[OutlineSlide(n=i, section="S", purpose="p", key_message="k") for i in (1, 2, 3)])
+    s = title_slide(brief, o, o.slides[0])
+    assert s.title == brief.topic and s.placeholders["subtitle"] == brief.objective and s.source_refs == []

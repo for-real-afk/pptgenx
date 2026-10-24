@@ -106,7 +106,8 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
     notes_path = run_dir / "deck_notes.json"
     deck_notes = json.loads(notes_path.read_text(encoding="utf-8")) if notes_path.exists() else {}
     report = {
-        "coverage": coverage(brief, findings.findings, spec),
+        "coverage": coverage(brief, findings.findings, spec), "quality": quality_metrics(spec, req.slides),
+        "review_before_use": review_items(spec, by_id, deck_notes),
         "deck_problems_unresolved": deck_notes.get("unresolved", []), "deck_problems_repaired_slides": deck_notes.get("repaired_slides", []),
         "run_id": run_dir.name, "topic": req.topic, "slides": len(spec.slides), "findings": len(findings.findings),
         "findings_used": len(used_ids), "research_stats": findings.stats, "stage_seconds": timings,
@@ -122,9 +123,40 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
         "qa_rounds": [{"round": r.round, "action": r.action, "accepted": r.accepted, "score": r.score}
                       for r in (qa_report.rounds if qa_report else [])],
     }
+    items = report["review_before_use"]
+    (run_dir / "review_before_use.md").write_text("# Review before use" + chr(10)*2 + chr(10).join(f"- {x}" for x in items) + chr(10), encoding="utf-8")
     (run_dir / "run_report.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
     (run_dir / "run_report.md").write_text(report_md(report), encoding="utf-8")
     return report
+
+
+def review_items(spec: DeckSpec, by_id: dict, notes: dict) -> list[str]:
+    """What a human should check before using the deck: shaky findings actually on slides, contested numbers, unresolved problems."""
+    out = []
+    for i, s in enumerate(spec.slides, 1):
+        for r in s.source_refs:
+            f = by_id.get(r)
+            if not f:
+                continue
+            why = [x for x in (f.review_reason, "contradicts another finding (" + ", ".join(f.conflicts_with) + ")" if f.conflicts_with else "",
+                               "low confidence" if f.confidence == "low" else "", "source text contained instruction-like content" if f.flagged else "") if x]
+            if why:
+                out.append(f"slide {i}, {r} ({f.source_url}): {'; '.join(why)} - \"{f.claim[:110]}\"")
+        if "built directly from the research findings" in s.speaker_notes.lower():
+            out.append(f"slide {i}: fallback slide built from raw findings after generation failed; wording is plain by design")
+    out += [f"unresolved cross-slide problem on slides {p['slides']}: {p['description']}" for p in notes.get("unresolved", [])]
+    return out
+
+
+def quality_metrics(spec: DeckSpec, requested: int) -> dict:
+    from deckgen.spec.claims import _is_concrete, visible_fields
+
+    content = [s for s in spec.slides if s.layout not in ("TITLE", "SECTION", "SOURCES", "CLOSING")]
+    stmts = [t for s in content for f, t in visible_fields(s) if f in ("body", "bullets", "detail", "label") and len(t.split()) >= 4]
+    refs = [r for s in content for r in set(s.source_refs)]
+    return {"slides_built": len(spec.slides), "slides_requested": requested,
+            "specificity": round(sum(_is_concrete(t) for t in stmts) / len(stmts), 2) if stmts else None,
+            "distinct_evidence": round(len(set(refs)) / len(refs), 2) if refs else None}
 
 
 def write_sources(path: Path, used) -> None:
@@ -150,6 +182,8 @@ def report_md(r: dict) -> str:
             f"- QA blocking issues remaining: {r['qa_blocking_remaining']} (stopped: {r['qa_stopped']})",
             f"- models: {r['models']}", f"- {r['llm']}",
             f"- cross-slide problems repaired on slides {r['deck_problems_repaired_slides']}; unresolved: {r['deck_problems_unresolved'] or 'none'}",
+            f"- quality: {r['quality']}",
+            f"- REVIEW BEFORE USE ({len(r['review_before_use'])} items):"] + [f"  - {x}" for x in r["review_before_use"]] + [
             "- question coverage:"] + [f"  - {q}: {v}" for q, v in r["coverage"].items()]
     for q in r["qa_rounds"]:
         rows.append(f"  - round {q['round']}: {q['action']} -> {'kept' if q['accepted'] else 'reverted'}, score {q['score']}")

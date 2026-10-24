@@ -14,8 +14,8 @@ from deckgen.schemas import DeckSpec, SlideSpec
 from deckgen.schemas.draft import DraftConversionError, SlideDraft, draft_to_slide
 from deckgen.schemas.research import Brief, Finding, Findings, Outline, OutlineSlide
 from deckgen.spec import capacity
-from deckgen.spec.deck_checks import Problem, consistency, redundancy
-from deckgen.spec.faithfulness import unsupported_statements
+from deckgen.spec.deck_checks import Problem, consistency, redundancy, shared_evidence
+from deckgen.spec.faithfulness import check_slide_text
 from deckgen.spec.rules import check_slide
 from deckgen.spec.validate_spec import load_manifest, validate_spec
 
@@ -61,7 +61,7 @@ def _limits_menu() -> str:
 
 
 def _slide_prompt(brief: Brief, o: OutlineSlide, outline: Outline, cited: list[Finding], menu: str, limits: str,
-                  style: str, prev: list[SlideSpec], is_last: bool, errors: list[str]) -> str:
+                  style: str, prev: list[SlideSpec], is_last: bool, errors: list[str], spares: list[Finding] | None = None) -> str:
     recent = ", ".join(f"{p.layout}/{p.composition.kind if p.composition else '-'}" for p in prev[-3:]) or "none yet"
     facts = "\n".join(f"{f.id} [{f.confidence}] {f.claim} | evidence: {f.evidence_snippet}" for f in cited) or "(none: title slide)"
     p = (
@@ -78,6 +78,8 @@ def _slide_prompt(brief: Brief, o: OutlineSlide, outline: Outline, cited: list[F
         f"Key message: {o.key_message}\nRecent layouts used: {recent} (vary them).\n"
         + ("This is the closing slide: layout CLOSING.\n" if is_last else "")
         + f"\nFINDINGS:\n{facts}\n"
+        + (("\nSPARE FINDINGS (not used on any other slide; cite them if they let you replace vague text with concrete facts):\n"
+            + "\n".join(f"{f.id} [{f.confidence}] {f.claim}" for f in spares) + "\n") if spares else "")
     )
     if errors:
         p += "\nYour previous attempt was rejected. Fix ALL of these:\n- " + "\n- ".join(errors[:12])
@@ -90,6 +92,15 @@ def _caption(refs: list[str], findings: dict[str, Finding]) -> str | None:
         if r in findings and (d := domain(findings[r].source_url)) not in doms:
             doms.append(d)
     return ("Source: " + ", ".join(doms[:3])) if doms else None
+
+
+def title_slide(brief: Brief, outline: Outline, o: OutlineSlide) -> SlideSpec:
+    """Title and subtitle come from the request: the topic as asked, and the brief's objective (or the audience line)."""
+    limit = 48  # TITLE layout: 44 pt in a 7.6 in box, two lines
+    title = brief.topic if len(brief.topic) <= limit else outline.deck_title
+    sub = brief.objective.strip() if 0 < len(brief.objective.strip()) <= 180 else f"Prepared for {brief.audience}"
+    return SlideSpec(id=f"s{o.n:02d}", section=o.section, layout="TITLE", title=title, placeholders={"subtitle": sub},
+                     speaker_notes=f"Audience: {brief.audience}. {brief.objective}")
 
 
 def sources_slide(n: int, used: list[Finding]) -> SlideSpec:
@@ -116,9 +127,11 @@ def generate_slide(llm: LLM, brief: Brief, o: OutlineSlide, outline: Outline, fi
     style = (brand_dir / "style_guide.md").read_text(encoding="utf-8")
     menu, limits = _layout_menu(brand_dir), _limits_menu()
     manifest = load_manifest(brand_dir)
+    assigned = {i for sl in outline.slides for i in sl.finding_ids}
+    spares = [f for f in findings.values() if f.id not in assigned and f.confidence != "low" and not f.needs_review][:8]
     errors: list[str] = list(extra_errors or [])
     for attempt in range(1, CONFIG.spec_retries + 2):
-        prompt = _slide_prompt(brief, o, outline, cited, menu, limits, style, prev, is_last, errors)
+        prompt = _slide_prompt(brief, o, outline, cited, menu, limits, style, prev, is_last, errors, spares)
         d = llm.generate(stage="spec_slide", system=SYSTEM, prompt=prompt, schema=SlideDraft)
         d = d.model_copy(update={"id": f"s{o.n:02d}", "section": o.section})
         try:
@@ -130,8 +143,7 @@ def generate_slide(llm: LLM, brief: Brief, o: OutlineSlide, outline: Outline, fi
         if not errors:  # brand manifest limits (layout enum, placeholder names, max_chars) apply per slide too
             errors = validate_spec(DeckSpec(title=outline.deck_title, brand=brief.brand, slides=[s]), manifest)
         if not errors and CONFIG.faithfulness_check and s.layout not in ("TITLE", "SECTION", "SOURCES"):
-            bad = unsupported_statements(llm, s, cited)
-            errors = [f"not supported by the cited findings, remove or replace with what the findings say: {b}" for b in bad[:6]]
+            errors = check_slide_text(llm, s, [findings[r] for r in s.source_refs if r in findings])
         if not errors:
             tr = getattr(llm, "tracer", None)
             if tr:
@@ -202,6 +214,9 @@ def generate_spec(llm: LLM, brief: Brief, outline: Outline, findings: Findings, 
     by_id = {f.id: f for f in findings.findings}
     slides: list[SlideSpec] = []
     for o in outline.slides:
+        if o.n == 1 and o.layout_hint == "TITLE":
+            slides.append(title_slide(brief, outline, o))  # built from the request, never from findings
+            continue
         cache = run_dir / "slides" / f"s{o.n:02d}.json" if run_dir else None
         slides.append(generate_slide(llm, brief, o, outline, by_id, brand_dir, slides, o.n == len(outline.slides), cache))
     slides = _repair_deck(llm, brief, outline, by_id, brand_dir, slides, run_dir)
@@ -215,18 +230,26 @@ def generate_spec(llm: LLM, brief: Brief, outline: Outline, findings: Findings, 
 
 def _deck_problems(llm: LLM, slides: list[SlideSpec], brief: Brief, outline: Outline, by_id: dict[str, Finding]) -> list[Problem]:
     spec = DeckSpec(title=outline.deck_title, brand=brief.brand, slides=slides)
-    return consistency(llm, spec, by_id) + redundancy(spec)
+    return consistency(llm, spec, by_id) + redundancy(spec) + shared_evidence(spec)
 
 
 def _repair_deck(llm: LLM, brief: Brief, outline: Outline, by_id: dict[str, Finding], brand_dir: Path,
                  slides: list[SlideSpec], run_dir: Path | None) -> list[SlideSpec]:
-    """One repair pass: the later slide of each contradiction/redundancy is regenerated with the problem as feedback.
+    """One repair pass. Redundancy is fixed by DELETING the later slide (a shorter deck, not rewritten cards);
+    contradictions and unclear references regenerate the later slide with the problem as feedback.
     Whatever remains is written to deck_notes.json and surfaced in the run report."""
     problems = _deck_problems(llm, slides, brief, outline, by_id)
+    last = len(slides)
+    min_keep = 6  # never shrink the deck below this (title, content, closing, sources)
+    drop: set[int] = set()
+    for p in sorted((p for p in problems if p.kind == "redundancy"), key=lambda p: max(p.slides)):
+        t = max(p.slides)
+        if 1 < t < last and len(slides) - len(drop) - 1 >= min_keep:
+            drop.add(t)
     fixes: dict[int, list[str]] = {}
     for p in problems:
         target = max(p.slides)
-        if 1 < target < len(slides):  # never rewrite the title or closing slide
+        if p.kind != "redundancy" and 1 < target < last and target not in drop:  # never rewrite the title or closing slide
             others = [n for n in p.slides if n != target]
             fixes.setdefault(target, []).append(f"{p.kind} with slide(s) {others}: {p.description}. Resolve it using only the findings.")
     by_n = {o.n: o for o in outline.slides}
@@ -234,12 +257,18 @@ def _repair_deck(llm: LLM, brief: Brief, outline: Outline, by_id: dict[str, Find
     for n, errs in fixes.items():
         cache = run_dir / "slides" / f"s{n:02d}.json" if run_dir else None
         try:
-            slides[n - 1] = generate_slide(llm, brief, by_n[n], outline, by_id, brand_dir, slides[:n - 1], n == len(slides), cache, errs)
+            slides[n - 1] = generate_slide(llm, brief, by_n[n], outline, by_id, brand_dir, slides[:n - 1], n == last, cache, errs)
         except SpecGenerationError:
             failed.append(n)  # keep the original slide; the problem stays listed as unresolved
-    remaining = _deck_problems(llm, slides, brief, outline, by_id) if set(fixes) - set(failed) else problems
+    dropped_titles = [slides[n - 1].title for n in sorted(drop)]
+    if drop:
+        kept = [s for k, s in enumerate(slides, 1) if k not in drop]
+        slides = [s.model_copy(update={"id": f"s{k:02d}"}) for k, s in enumerate(kept, 1)]
+    changed = bool(drop or set(fixes) - set(failed))
+    remaining = _deck_problems(llm, slides, brief, outline, by_id) if changed else problems
     if run_dir:
-        notes = {"problems_found": [p.model_dump() for p in problems], "repaired_slides": sorted(set(fixes) - set(failed)), "repair_failed_slides": failed,
+        notes = {"problems_found": [p.model_dump() for p in problems], "repaired_slides": sorted(set(fixes) - set(failed)),
+                 "repair_failed_slides": failed, "deleted_slides": sorted(drop), "deleted_titles": dropped_titles,
                  "unresolved": [p.model_dump() for p in remaining]}
         (run_dir / "deck_notes.json").write_text(json.dumps(notes, indent=1), encoding="utf-8")
     return slides

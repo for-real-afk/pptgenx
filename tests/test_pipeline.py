@@ -45,11 +45,12 @@ def extract(prompt, images):
 
 def slide_draft(prompt, images):
     n = int(re.search(r"id=s(\d\d)", prompt).group(1))
-    base = dict(id=f"s{n:02d}", section="S", speaker_notes="Detail goes here. It has two sentences.", source_refs=["f01", "f02"])
+    base = dict(id=f"s{n:02d}", section="S", speaker_notes="Detail goes here. It has two sentences.",
+                source_refs={2: ["f01", "f02"], 3: ["f03", "f04"], 4: ["f05", "f06"]}.get(n, ["f01"]))
     if n == 1:
         return SlideDraft(**{**base, "source_refs": []}, layout="TITLE", title="Group B in brief", subtitle="Rules, cars and the ban")
     if n == 2:
-        items = [ItemDraft(icon="FaCarSide", heading=f"Idea {i}", body="Short body text here.") for i in range(3)]
+        items = [ItemDraft(icon="FaCarSide", heading=f"Idea {i}", body=f"Rule {i}: builders needed 200 road cars in 1982.") for i in range(3)]
         return SlideDraft(**base, layout="TITLE_ONLY", title="Three ideas shaped the cars", comp_kind="cards", items=items)
     if n == 3:
         return SlideDraft(**base, layout="CHART_COMMENTARY", title="Power climbed across the whole field",
@@ -71,8 +72,8 @@ def script():
         "outline": Outline(arc="rise-peak-fall-legacy", deck_title="Group B in brief", slides=[
             OutlineSlide(n=1, section="Open", purpose="Title", key_message="Intro", layout_hint="TITLE"),
             OutlineSlide(n=2, section="Open", purpose="Ideas", key_message="Ideas", finding_ids=["f01", "f02"], layout_hint="TITLE_ONLY"),
-            OutlineSlide(n=3, section="Cars", purpose="Power", key_message="Power", finding_ids=["f01", "f02"], layout_hint="CHART_COMMENTARY"),
-            OutlineSlide(n=4, section="Cars", purpose="Dates", key_message="Dates", finding_ids=["f01", "f02"], layout_hint="TITLE_ONLY"),
+            OutlineSlide(n=3, section="Cars", purpose="Power", key_message="Power", finding_ids=["f03", "f04"], layout_hint="CHART_COMMENTARY"),
+            OutlineSlide(n=4, section="Cars", purpose="Dates", key_message="Dates", finding_ids=["f05", "f06"], layout_hint="TITLE_ONLY"),
             OutlineSlide(n=5, section="End", purpose="Close", key_message="Close", finding_ids=["f01"], layout_hint="CLOSING")]),
         "spec_slide": slide_draft,
         "faithfulness": {"unsupported": []},

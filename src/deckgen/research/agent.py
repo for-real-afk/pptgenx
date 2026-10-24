@@ -61,13 +61,13 @@ class State(TypedDict):
     stop_reason: str
 
 
-def build_agent(llm: LLM, tools: ResearchTools, brief: Brief):
+def build_agent(llm: LLM, tools: ResearchTools, brief: Brief, hint: str = ""):
     qs = brief.research_questions
 
     def ask_and_gather(st: State) -> State:
         q = qs[st["i"]]
         plan = llm.generate(stage="research_query", system=QUERY_SYSTEM, schema=QueryPlan,
-                            prompt=f"Topic: {brief.topic}\nResearch question: {q}\nWrite 1-2 precise web search queries that would find authoritative answers.")
+                            prompt=f"Topic: {brief.topic}\nResearch question: {q}\nWrite 1-2 precise web search queries that would find authoritative answers.{hint}")
         results: list[SearchResult] = []
         try:
             for query in plan.queries[:2]:
@@ -76,6 +76,15 @@ def build_agent(llm: LLM, tools: ResearchTools, brief: Brief):
             if not results:
                 return {**st, "done": True, "stop_reason": str(e)}
         pages = _pick(results, st["seen"])
+        try:  # Wikipedia is a pointer: also read the primary sources it cites
+            for wp in [p for p in pages if "wikipedia.org" in p.url][:1]:
+                refs = [u for u in tools.references(wp.url) if not any(d in u.lower() for d in DENY) and u not in st["seen"]]
+                refs.sort(key=lambda u: TYPE_RANK[source_type(u)], reverse=True)
+                pages += [SearchResult(title="", url=u, snippet="", content="") for u in refs[:2]]
+        except BudgetExhausted:
+            pass
+        except Exception:  # noqa: BLE001 - references are a bonus; never fail the question for them
+            pass
         new, flagged = [], st["flagged_pages"]
         for res in pages:
             text = res.content
@@ -151,11 +160,52 @@ def crosscheck(llm: LLM, findings: list[Finding]) -> list[Finding]:
     return [f.model_copy(update={"conflicts_with": sorted(links.get(f.id, []))}) for f in findings]
 
 
+STRONG = re.compile(r"\b(first|only|all|every|always|never|none|exponential\w*|unprecedented|unmatched|greatest|best|entire|"
+                    r"concluded|determined|announced|investigation|found that|banned|prohibited)\b|\d{3,}|\d+%", re.I)
+
+
+def _toks(t: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9]+", t.lower()) if len(w) > 3}
+
+
+def _root(url: str) -> str:
+    return ".".join(urlparse(url).netloc.lower().removeprefix("www.").split(".")[-2:])
+
+
+def corroborate(findings: list[Finding]) -> list[Finding]:
+    """Count independent websites that state the same thing; mark strong single-source claims for attribution and review."""
+    toks = [_toks(f.claim) for f in findings]
+    out = []
+    for i, f in enumerate(findings):
+        roots = {_root(f.source_url)}
+        for j, g in enumerate(findings):
+            if i != j and _root(g.source_url) not in roots and toks[i] and toks[j] and \
+                    len(toks[i] & toks[j]) / len(toks[i] | toks[j]) >= 0.4:
+                roots.add(_root(g.source_url))
+        weak = len(roots) == 1 and f.source_type not in ("official", "archive") and bool(STRONG.search(f.claim))
+        out.append(f.model_copy(update={"corroborated_by": len(roots), "needs_review": weak,
+                                        "review_reason": "strong claim from a single non-official source" if weak else ""}))
+    return out
+
+
+FOLLOWUP_HINT = ("\nA first search found little. Use different wording, name specific entities, and target authoritative "
+                 "sites (official bodies, archives, manufacturer or organisation histories, established publications).")
+
+
 def run_research(llm: LLM, tools: ResearchTools, brief: Brief) -> Findings:
-    agent = build_agent(llm, tools, brief)
-    final = agent.invoke({"i": 0, "findings": [], "seen": [], "flagged_pages": 0, "done": False, "stop_reason": ""},
-                         {"recursion_limit": 4 * max(len(brief.research_questions), 1) + 10})
-    findings = crosscheck(llm, _dedupe(final["findings"]))
-    stats = {**tools.budget.stats(), "flagged_pages": final["flagged_pages"], "questions": len(brief.research_questions),
-             "questions_done": min(final["i"], len(brief.research_questions)), "stopped_early": int(bool(final["stop_reason"]))}
+    qs = brief.research_questions
+    init = {"i": 0, "findings": [], "seen": [], "flagged_pages": 0, "done": False, "stop_reason": ""}
+    final = build_agent(llm, tools, brief).invoke(init, {"recursion_limit": 4 * max(len(qs), 1) + 10})
+    # follow-up pass: questions that came back thin get different wording and a push towards authoritative sites
+    thin = [q for q in qs if sum(f.question == q for f in final["findings"]) < 2]
+    if thin and not final["stop_reason"]:
+        b2 = brief.model_copy(update={"research_questions": thin})
+        f2 = build_agent(llm, tools, b2, FOLLOWUP_HINT).invoke(
+            {**init, "seen": final["seen"], "findings": final["findings"], "flagged_pages": final["flagged_pages"]},
+            {"recursion_limit": 4 * len(thin) + 10})
+        final = {**f2, "i": final["i"]}
+    findings = corroborate(crosscheck(llm, _dedupe(final["findings"])))
+    stats = {**tools.budget.stats(), "flagged_pages": final["flagged_pages"], "questions": len(qs),
+             "questions_done": min(final["i"], len(qs)), "stopped_early": int(bool(final["stop_reason"])),
+             "followup_questions": len(thin), "needs_review": sum(f.needs_review for f in findings)}
     return Findings(findings=findings, stats=stats)
