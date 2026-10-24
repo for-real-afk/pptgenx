@@ -25,7 +25,7 @@ def validate_spec(spec: DeckSpec, manifest: dict) -> list[str]:
             errs.append(f"{s.id}: title must not end with a period")
         title_max = phs.get("title", {}).get("max_chars")
         if title_max and len(s.title) > title_max:
-            errs.append(f"{s.id}: title {len(s.title)} chars > max {title_max}")
+            errs.append(f"{s.id}: title '{s.title}' is {len(s.title)} chars but layout {s.layout} allows {title_max}: remove at least {len(s.title) - title_max} chars")
         for name, val in s.placeholders.items():
             ph = phs.get(name)
             if not ph:
@@ -33,7 +33,7 @@ def validate_spec(spec: DeckSpec, manifest: dict) -> list[str]:
                 continue
             text = " ".join(val) if isinstance(val, list) else val
             if ph["max_chars"] and len(text) > ph["max_chars"]:
-                errs.append(f"{s.id}: placeholder '{name}' {len(text)} chars > max {ph['max_chars']}")
+                errs.append(f"{s.id}: placeholder '{name}' is {len(text)} chars but allows {ph['max_chars']}: remove at least {len(text) - ph['max_chars']} chars")
         if s.composition and s.layout != "TITLE_ONLY":
             errs.append(f"{s.id}: composition needs layout TITLE_ONLY")
         if s.chart and "chart" not in phs:

@@ -16,7 +16,7 @@ from deckgen.research.tools import BudgetExhausted, ResearchTools, SearchResult
 from deckgen.schemas.research import Brief, ConflictReport, Finding, Findings, QueryPlan, RawFindings
 
 PER_QUESTION_PAGES = 3
-DENY = ("forum", "ukessays", "quora", "reddit", "pinterest", "scribd", "studocu", "medium.com", "facebook.", "snaplap", "answers.")
+DENY = ("forum", "ukessays", "quora", "reddit", "pinterest", "scribd", "studocu", "medium.com", "facebook.", "snaplap", "answers.", "instagram.", "youtube.", "youtu.be", "tiktok.", "twitter.", "x.com", "linkedin.", "headcountcoffee")
 MIN_PAGE_CHARS = 400
 
 DOMAIN_TYPES = [

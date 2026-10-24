@@ -72,6 +72,7 @@ def script():
             OutlineSlide(n=4, section="Cars", purpose="Dates", key_message="Dates", finding_ids=["f01", "f02"], layout_hint="TITLE_ONLY"),
             OutlineSlide(n=5, section="End", purpose="Close", key_message="Close", finding_ids=["f01"], layout_hint="CLOSING")]),
         "spec_slide": slide_draft,
+        "faithfulness": {"unsupported": []},
         "critic": CriticReport(issues=[]),
         "critic_consistency": CriticReport(issues=[]),
     }
@@ -147,3 +148,22 @@ def test_every_composition_at_max_capacity_fits(tmp_path):
     assert bad == [], [(i.slide, i.description) for i in bad]
     need_render()
     assert len(soffice.render_deck(out, tmp_path / "r")) == len(slides)
+
+
+def test_faithfulness_feedback_triggers_regeneration(tmp_path):
+    """An unsupported statement is fed back as an error and the slide is regenerated until it passes."""
+    from deckgen.schemas.research import Brief
+    from deckgen.spec.spec_generator import generate_slide
+
+    findings = {f"f0{i}": Finding(id=f"f0{i}", question="q", claim=FACT, evidence_snippet="200 cars 450 480 500 hp", source_type="official",
+                                  source_url="https://www.wrc.com/x", retrieved_at="2026-01-01T00:00:00+00:00", confidence="high") for i in (1, 2)}
+    verdicts = iter([{"unsupported": ["Audi won in 1983"]}, {"unsupported": []}])
+    sc = script()
+    sc["faithfulness"] = lambda prompt, images: next(verdicts)
+    llm = FakeLLM(sc)
+    brief = Brief(topic="t", audience="a", slide_count=6)
+    outline = sc["outline"]
+    slide = generate_slide(llm, brief, outline.slides[1], outline, findings, BRAND, [], False)
+    assert slide.id == "s02"
+    assert [c["stage"] for c in llm.calls].count("spec_slide") == 2
+    assert "Audi won in 1983" in llm.calls[2]["prompt"]  # second attempt saw the fact-check feedback

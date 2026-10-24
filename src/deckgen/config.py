@@ -35,6 +35,7 @@ class Config:
     max_words_per_bullet: int = 16
     spec_retries: int = 3
     pin_models: bool = os.environ.get("DECKGEN_PIN_MODELS", "") == "1"  # QA/evals: no silent fallback
+    faithfulness_check: bool = os.environ.get("DECKGEN_FAITHFULNESS", "1") == "1"
     max_llm_calls: int = _int("DECKGEN_MAX_LLM_CALLS", 150)
     max_search_calls: int = _int("DECKGEN_MAX_SEARCH_CALLS", 60)
     # QA

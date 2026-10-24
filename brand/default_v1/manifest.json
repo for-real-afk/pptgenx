@@ -103,14 +103,14 @@
         {
           "name": "title",
           "type": "title",
-          "font_size": 36,
-          "max_chars": 32
+          "font_size": 32,
+          "max_chars": 74
         },
         {
           "name": "body",
           "type": "body",
-          "font_size": 24,
-          "max_chars": 450
+          "font_size": 22,
+          "max_chars": 539
         }
       ]
     },

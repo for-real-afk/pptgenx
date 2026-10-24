@@ -50,8 +50,8 @@ const LAYOUTS = [
     name: "CLOSING", dark: true, motif: true,
     use_when: "Conclusion and next steps; dark bookend.",
     placeholders: [
-      { name: "title", type: "title", x: MARGIN, y: 0.9, w: 8.0, h: 1.1, fontSize: 36, bold: true, color: "bg1", valign: "middle" },
-      { name: "body", type: "body", x: MARGIN, y: 2.4, w: 7.6, h: 4.0, fontSize: 24, color: "bg1", valign: "top" },
+      { name: "title", type: "title", x: MARGIN, y: 0.9, w: 8.4, h: 1.3, fontSize: 32, bold: true, color: "bg1", valign: "middle" },
+      { name: "body", type: "body", x: MARGIN, y: 2.5, w: 7.6, h: 4.2, fontSize: 22, color: "bg1", valign: "top" },
     ],
   },
   {

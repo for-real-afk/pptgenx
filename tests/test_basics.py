@@ -39,7 +39,7 @@ def test_bad_layout_placeholder_and_capacity_caught():
     errs = validate_spec(spec, load_manifest(BRAND))
     assert any("NOPE" in e for e in errs)
     assert any("bogus" in e for e in errs)
-    assert any("max" in e and "s09" in e for e in errs)
+    assert any("allows" in e and "s09" in e for e in errs)
 
 
 def test_renderer_rejects_misspelt_layout(tmp_path):

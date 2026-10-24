@@ -67,6 +67,10 @@ def check_slide(s: SlideSpec, findings: dict[str, Finding], prev: list[SlideSpec
             if n_words(b) > CONFIG.max_words_per_bullet or len(b) > cmax:
                 e.append(f"bullet '{b[:40]}...' too long (max {CONFIG.max_words_per_bullet} words, {cmax} chars)")
 
+    if s.layout == "CLOSING" and isinstance(body, list):
+        if len(body) > 4 or any(len(b) > 80 for b in body):
+            e.append("CLOSING takes at most 4 bullets of at most 80 chars each")
+
     # composition capacity + grounding
     c = s.composition
     if c:

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,6 +45,7 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
                  confirm: Callable | None = None, edit: Callable | None = None) -> dict:
     run_dir.mkdir(parents=True, exist_ok=True)
     brand_dir = CONFIG.brands_dir / req.brand
+    subprocess.run(["node", str(CONFIG.renderer_dir / "gen_manifest.js"), str(brand_dir)], check=True, capture_output=True)  # manifest can never lag layouts.js
     force = STAGES.index(from_stage) if from_stage else len(STAGES)
     timings: dict[str, float] = {}
 

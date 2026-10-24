@@ -36,8 +36,8 @@ function verifySpec(spec, manifest) {
   if (errs.length) throw new Error("spec verification failed:\n  " + errs.join("\n  "));
 }
 
-const asRuns = (v) =>
-  Array.isArray(v) ? v.map((t, i) => ({ text: t, options: { bullet: true, breakLine: i < v.length - 1, paraSpaceAfter: 14 } })) : v;
+const asRuns = (v, space = 14) =>
+  Array.isArray(v) ? v.map((t, i) => ({ text: t, options: { bullet: true, breakLine: i < v.length - 1, paraSpaceAfter: space } })) : v;
 
 function addChart(slide, pres, theme, c) {
   const hex = (k) => theme.colors[k];
@@ -53,6 +53,7 @@ function addChart(slide, pres, theme, c) {
     showLegend: multi, legendFontFace: CHART_FONT, legendFontSize: 12, legendColor: hex("dk1"), legendPos: "b",
   };
   if (t === "bar") Object.assign(opts, { barDir: c.type === "bar" ? "bar" : "col", barGapWidthPct: 60 });
+    opts.valAxisMinVal = 0; // bars always start at zero: a truncated axis exaggerates differences
     if (c.type === "bar") opts.catAxisOrientation = "maxMin"; // first category on top
   if (t === "bar" || t === "line") {
     Object.assign(opts, {
@@ -91,7 +92,7 @@ async function buildDeck(spec, brandDir, outFile) {
     if (s.section !== section) { pres.addSection({ title: s.section }); section = s.section; }
     const slide = pres.addSlide({ masterName: s.layout, sectionTitle: s.section });
     slide.addText(s.title, { placeholder: "title" });
-    for (const [name, v] of Object.entries(s.placeholders || {})) slide.addText(asRuns(v), { placeholder: name });
+    for (const [name, v] of Object.entries(s.placeholders || {})) slide.addText(asRuns(v, s.layout === "SOURCES" ? 4 : 14), { placeholder: name });
     const ctx = { pres, slide, C, theme };
     if (s.composition) await compose[s.composition.kind](ctx, s.composition.items, CONTENT);
     if (s.chart) addChart(slide, pres, theme, s.chart);
