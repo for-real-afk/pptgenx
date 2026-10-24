@@ -79,5 +79,47 @@ def qa(run: str = typer.Option(None, help="run id under runs/ containing deck_sp
     raise typer.Exit(1 if report.render_error or report.file_errors or policy.blocking(report.remaining) else 0)
 
 
+def make_tools() -> "ResearchTools":
+    from deckgen.research.tools import Budget, HttpFetcher, ResearchTools, TavilySearch
+
+    budget = Budget(CONFIG.max_tool_calls, CONFIG.max_pages, CONFIG.max_seconds, CONFIG.max_search_calls)
+    return ResearchTools(TavilySearch(), HttpFetcher(), budget)
+
+
+@app.command()
+def generate(
+    topic: str = typer.Option(..., help="deck topic"),
+    audience: str = typer.Option("general audience"),
+    slides: int = typer.Option(14),
+    brand: str = typer.Option("default_v1"),
+    run_id: str = typer.Option(None, help="re-use a run id to resume (completed stages are skipped)"),
+    from_stage: str = typer.Option(None, help="force re-run from: plan|research|outline|spec|qa"),
+    auto_approve: bool = typer.Option(False, help="skip the outline approval prompt"),
+    qa_loop: bool = typer.Option(True, "--qa/--no-qa"),
+) -> None:
+    """Topic -> researched, sourced, QA'd .pptx under runs/<run_id>/."""
+    import time
+
+    from deckgen.llm import Tracer, make_llm
+    from deckgen.pipeline import Request, report_md, run_pipeline, slug
+
+    rid = run_id or f"{slug(topic)}-{time.strftime('%m%d-%H%M')}"
+    run_dir = CONFIG.runs_dir / rid
+    run_dir.mkdir(parents=True, exist_ok=True)
+    llm = make_llm(Tracer(run_dir / "trace.jsonl"))
+    report = run_pipeline(Request(topic, audience, slides, brand), llm, make_tools(), run_dir,
+                          auto_approve=auto_approve, from_stage=from_stage, do_qa=qa_loop)
+    typer.echo(report_md(report))
+    typer.echo(f"\ndeck: {run_dir / 'deck.pptx'}\nimages: {run_dir / 'final' / 'images'}\nsources: {run_dir / 'sources.md'}")
+
+
+@app.command("eval")
+def eval_(golden: Path = typer.Option(Path("evals/golden_topics.json")), only: str = typer.Option(None, help="substring of topic")) -> None:
+    """Run the golden topics and print the per-run metrics table."""
+    from evals.run_evals import run_all
+
+    raise typer.Exit(run_all(golden, only))
+
+
 if __name__ == "__main__":
     app()

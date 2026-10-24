@@ -27,8 +27,8 @@ class Config:
     fallback_models: tuple = tuple(m for m in os.environ.get("DECKGEN_FALLBACK_MODELS", "gemini-3.1-flash-lite,gemini-flash-lite-latest,gemini-2.5-flash").split(",") if m)
     vision_model: str = os.environ.get("DECKGEN_VISION_MODEL", "")
     # research budgets
-    max_tool_calls: int = _int("DECKGEN_MAX_TOOL_CALLS", 30)
-    max_pages: int = _int("DECKGEN_MAX_PAGES", 15)
+    max_tool_calls: int = _int("DECKGEN_MAX_TOOL_CALLS", 45)
+    max_pages: int = _int("DECKGEN_MAX_PAGES", 25)
     max_seconds: int = _int("DECKGEN_MAX_SECONDS", 300)
     # spec limits (enforced at writing time)
     max_bullets: int = 5

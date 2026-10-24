@@ -4,7 +4,7 @@ const { text, panel, iconCircle } = require("./common");
 // items: [{icon, heading, body}] (3-5). One full-width panel per row.
 async function iconRows(ctx, items, region) {
   const cells = rows(items.length, region);
-  const d = 0.85, pad = 0.3, headW = 3.0;
+  const d = Math.min(0.85, cells[0].h - 0.2), pad = 0.3, headW = 3.0; // circle never taller than its row
   for (const [i, it] of items.entries()) {
     const r = cells[i], n = `Row ${i + 1}`;
     panel(ctx, r, `${n} panel`);

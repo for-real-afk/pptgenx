@@ -85,6 +85,7 @@ async function buildDeck(spec, brandDir, outFile) {
   const C = pres.SchemeColor;
   await layouts.defineAll(pres, theme, spec.motif_icon);
 
+  const manifestDark = Object.fromEntries(manifest.layouts.map((l) => [l.name, l.dark]));
   let section = null;
   for (const s of spec.slides) {
     if (s.section !== section) { pres.addSection({ title: s.section }); section = s.section; }
@@ -96,7 +97,7 @@ async function buildDeck(spec, brandDir, outFile) {
     if (s.chart) addChart(slide, pres, theme, s.chart);
     if (s.table) addTable(slide, C, s.table);
     if (s.source_caption) {
-      slide.addText(s.source_caption, { isTextBox: true, margin: 0, x: MARGIN, y: SOURCE_Y, w: W - 2 * MARGIN - 1, h: 0.25, fontSize: 10, color: C.accent3, valign: "middle", objectName: "Source caption" });
+      slide.addText(s.source_caption, { isTextBox: true, margin: 0, x: MARGIN, y: SOURCE_Y, w: W - 2 * MARGIN - 1, h: 0.25, fontSize: 10, color: manifestDark[s.layout] ? C.background2 : C.accent3, valign: "middle", objectName: "Source caption" });
     }
     if (s.speaker_notes) slide.addNotes(s.speaker_notes);
   }
