@@ -1,17 +1,17 @@
 const { rows } = require("../grid");
-const { text, iconCircle } = require("./common");
+const { text, panel, iconCircle } = require("./common");
 
-// items: [{icon, heading, body}] (3-5)
+// items: [{icon, heading, body}] (3-5). One full-width panel per row.
 async function iconRows(ctx, items, region) {
-  const cells = rows(items.length, region, 0.2);
-  const d = 0.75;
+  const cells = rows(items.length, region);
+  const d = 0.85, pad = 0.3, headW = 3.0;
   for (const [i, it] of items.entries()) {
     const r = cells[i], n = `Row ${i + 1}`;
-    const cy = r.y + (r.h - d) / 2;
-    await iconCircle(ctx, it.icon, r.x, cy, d, n);
-    text(ctx, it.heading, { x: r.x + d + 0.3, y: r.y, w: 2.6, h: r.h, fontSize: 18, bold: true, color: ctx.C.text2, valign: "middle", objectName: `${n} heading` });
-    text(ctx, it.body, { x: r.x + d + 0.3 + 2.6 + GAPX, y: r.y, w: r.w - d - 0.3 - 2.6 - GAPX, h: r.h, fontSize: 16, color: ctx.C.text1, valign: "middle", objectName: `${n} body` });
+    panel(ctx, r, `${n} panel`);
+    await iconCircle(ctx, it.icon, r.x + pad, r.y + (r.h - d) / 2, d, n);
+    const hx = r.x + pad + d + 0.3;
+    text(ctx, it.heading, { x: hx, y: r.y, w: headW, h: r.h, fontSize: 22, bold: true, color: ctx.C.text2, valign: "middle", objectName: `${n} heading` });
+    text(ctx, it.body, { x: hx + headW + 0.3, y: r.y, w: r.x + r.w - pad - (hx + headW + 0.3), h: r.h, fontSize: 18, color: ctx.C.text1, valign: "middle", objectName: `${n} body` });
   }
 }
-const GAPX = 0.3;
 module.exports = { iconRows };

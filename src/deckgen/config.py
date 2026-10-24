@@ -24,6 +24,7 @@ class Config:
     # LLM
     llm_provider: str = os.environ.get("DECKGEN_LLM_PROVIDER", "gemini")
     model: str = os.environ.get("DECKGEN_MODEL", "")
+    fallback_model: str = os.environ.get("DECKGEN_FALLBACK_MODEL", "gemini-2.5-flash")
     vision_model: str = os.environ.get("DECKGEN_VISION_MODEL", "")
     # research budgets
     max_tool_calls: int = _int("DECKGEN_MAX_TOOL_CALLS", 30)
@@ -33,6 +34,8 @@ class Config:
     max_bullets: int = 5
     max_words_per_bullet: int = 16
     spec_retries: int = 3
+    max_llm_calls: int = _int("DECKGEN_MAX_LLM_CALLS", 150)
+    max_search_calls: int = _int("DECKGEN_MAX_SEARCH_CALLS", 60)
     # QA
     qa_max_rounds: int = 3
     soffice_timeout: int = 120

@@ -98,4 +98,5 @@ class SlideSpec(_Strict):
 class DeckSpec(_Strict):
     title: str
     brand: str
+    motif_icon: str | None = None  # react-icons name for the dark-layout motif; brand default if omitted
     slides: list[SlideSpec] = Field(min_length=1)

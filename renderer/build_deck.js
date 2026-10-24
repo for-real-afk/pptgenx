@@ -37,7 +37,7 @@ function verifySpec(spec, manifest) {
 }
 
 const asRuns = (v) =>
-  Array.isArray(v) ? v.map((t, i) => ({ text: t, options: { bullet: true, breakLine: i < v.length - 1, paraSpaceAfter: 10 } })) : v;
+  Array.isArray(v) ? v.map((t, i) => ({ text: t, options: { bullet: true, breakLine: i < v.length - 1, paraSpaceAfter: 14 } })) : v;
 
 function addChart(slide, pres, theme, c) {
   const hex = (k) => theme.colors[k];
@@ -71,7 +71,7 @@ function addTable(slide, C, tbl) {
   const body = tbl.rows.map((r, ri) => r.map((c) => ({ text: String(c), options: { fontSize: 14, color: C.text1, fill: { color: ri % 2 ? C.background2 : C.background1 } } })));
   slide.addTable([hdr, ...body], {
     placeholder: "table", x: MARGIN, y: CONTENT.y, w: W - 2 * MARGIN, autoPageSlideStartY: CONTENT.y,
-    border: { type: "solid", pt: 0.5, color: "D0D5DD" }, margin: [0.1, 0.15, 0.1, 0.15], valign: "middle", rowH: 0.6,
+    border: { type: "solid", pt: 0.5, color: "D0D5DD" }, margin: [0.1, 0.15, 0.1, 0.15], valign: "middle", rowH: Math.min(0.85, CONTENT.h / (tbl.rows.length + 1)),
   });
 }
 
@@ -83,7 +83,7 @@ async function buildDeck(spec, brandDir, outFile) {
   pres.theme = { headFontFace: theme.headFontFace, bodyFontFace: theme.bodyFontFace };
   pres.title = spec.title;
   const C = pres.SchemeColor;
-  layouts.defineAll(pres, theme);
+  await layouts.defineAll(pres, theme, spec.motif_icon);
 
   let section = null;
   for (const s of spec.slides) {

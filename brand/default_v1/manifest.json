@@ -8,14 +8,14 @@
         {
           "name": "title",
           "type": "title",
-          "font_size": 48,
-          "max_chars": 62
+          "font_size": 44,
+          "max_chars": 48
         },
         {
           "name": "subtitle",
           "type": "body",
           "font_size": 20,
-          "max_chars": 225
+          "max_chars": 216
         }
       ]
     },
@@ -104,13 +104,13 @@
           "name": "title",
           "type": "title",
           "font_size": 36,
-          "max_chars": 48
+          "max_chars": 32
         },
         {
           "name": "body",
           "type": "body",
-          "font_size": 18,
-          "max_chars": 1092
+          "font_size": 24,
+          "max_chars": 450
         }
       ]
     },
@@ -128,8 +128,8 @@
         {
           "name": "body",
           "type": "body",
-          "font_size": 12,
-          "max_chars": 3480
+          "font_size": 14,
+          "max_chars": 2604
         }
       ]
     }
