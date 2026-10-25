@@ -99,3 +99,9 @@ heading-name check, two-source numbers); fetch full pages for research (6000-cha
   Contradictions/unclear references are fixed on the later slide with a diff.
 - Closing: forward-looking AND sourced (source_refs required); if the findings cannot support a point it writes fewer bullets; last resort is a closing built from validated titles.
 - Title slide still built from the request. `generate_slide` is gone; `build_slide`/`write_slide` replace it.
+
+## Round 2, step 5: layout from data shape
+- `research/shapes.py` (topic-independent): 3+ findings with the same unit for different named things -> chart hint; 4+ dated findings from one question -> table hint.
+  Hints go to the outliner prompt; `attach()` gives each CHART_COMMENTARY/TABLE outline slide its best-matching hint as `data_hint`; the writer prompt shows it
+  ("use only these values; cite their ids"). Grounding rules still require every chart/table number to appear in the cited findings and two independent origins.
+- Numbers are kept consistent across slides by sourcing both from the same findings plus the existing LLM contradiction pass (no new check type).

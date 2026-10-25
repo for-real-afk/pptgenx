@@ -6,6 +6,8 @@ from pathlib import Path
 
 from deckgen.llm import LLM
 from deckgen.planning.arcs import ARCS
+from deckgen.research.shapes import attach as attach_hints
+from deckgen.research.shapes import detect as detect_shapes
 from deckgen.schemas.research import Brief, Findings, Outline
 
 MIN_SLIDES = 5
@@ -99,6 +101,10 @@ def outline(llm: LLM, brief: Brief, findings: Findings, retries: int = 3) -> Out
         "something forward-looking (implications, what to watch, next steps) and must not recap earlier slides; its findings "
         "may repeat earlier ones. Avoid findings marked SINGLE-SOURCE STRONG CLAIM unless nothing else covers the point."
     )
+    hints = detect_shapes([f for f in findings.findings if not f.excluded])
+    if hints:
+        base += (chr(10) * 2 + "DATA SHAPES FOUND IN THE FINDINGS (use a CHART_COMMENTARY or TABLE slide for one of these when it fits; values must come "
+                 "from the findings):" + chr(10) + chr(10).join(f"- {h.text()}" for h in hints[:4]))
     errs: list[str] = []
     for _ in range(retries + 1):
         prompt = base + (f"\n\nYour previous outline was rejected: {errs}. Fix these." if errs else "")
@@ -108,7 +114,7 @@ def outline(llm: LLM, brief: Brief, findings: Findings, retries: int = 3) -> Out
         if not errs:
             if dropped:
                 print(f"outline: dropped slides the evidence cannot support: {dropped}")
-            return o
+            return o.model_copy(update={"slides": attach_hints(o.slides, hints)})
     raise OutlineError(f"outline invalid after {retries + 1} attempts: {errs}")
 
 

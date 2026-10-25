@@ -124,3 +124,51 @@ def test_research_runs_rounds_until_the_pool_target_and_reports_counts(monkeypat
     res = agent.run_research(llm, tools, Brief(topic="t", audience="a", slide_count=8, research_questions=["q1 about the topic", "q2 about the topic"]))
     assert res.stats["raw_findings"] >= 10 and res.stats["rounds"] >= 1
     assert res.stats["findings"] == len(res.findings) and res.stats["origins"] >= 5 and "usable" in res.stats
+
+
+# ---- step 5: data shapes -> table / chart -------------------------------------------------------------------------------------
+def test_shape_detector_finds_a_chart_and_a_table_and_ignores_unrelated_findings():
+    from deckgen.research.shapes import attach, detect
+    from deckgen.schemas.research import OutlineSlide
+
+    def g(i, claim, q="q1"):
+        x = f(i, claim, f"https://s{i}.example.org/p", page=f"unique page {i} " * 30)
+        return x.model_copy(update={"question": q})
+
+    power = [g(1, "Lancia Delta S4 produced 493 bhp at peak"), g(2, "Peugeot 205 T16 produced 550 bhp at peak"), g(3, "Audi Sport Quattro produced 450 bhp at peak")]
+    dated = [g(10 + i, f"The championship was won by driver number {i} in {1980 + i}", "q2") for i in range(5)]
+    noise = [g(20, "The weather was cloudy on the day"), g(21, "Spectators gathered along the road")]
+    hints = detect(power + dated + noise)
+    kinds = {h.kind: h for h in hints}
+    assert set(kinds) == {"chart", "table"}
+    assert kinds["chart"].unit == "bhp" and [r.value for r in kinds["chart"].rows] == ["493", "550", "450"]
+    assert [r.label for r in kinds["table"].rows] == ["1980", "1981", "1982", "1983", "1984"]
+    assert detect(noise) == []
+    slides = [OutlineSlide(n=2, section="s", purpose="p", key_message="k", finding_ids=["f01", "f02"], layout_hint="CHART_COMMENTARY"),
+              OutlineSlide(n=3, section="s", purpose="p", key_message="k", finding_ids=["f10"], layout_hint="TABLE"),
+              OutlineSlide(n=4, section="s", purpose="p", key_message="k", finding_ids=["f20"], layout_hint="TITLE_ONLY")]
+    out = attach(slides, hints)
+    assert "native chart candidate" in out[0].data_hint and "493" in out[0].data_hint
+    assert "table candidate" in out[1].data_hint and out[2].data_hint == ""
+
+
+def test_chart_written_from_a_hint_is_grounded_and_reaches_the_writer_prompt(tmp_path):
+    from deckgen.research.shapes import detect
+    from deckgen.schemas.draft import SeriesDraft, SlideDraft
+    from deckgen.schemas.research import Brief, Outline, OutlineSlide
+    from deckgen.spec.spec_generator import build_slide
+
+    fs = {}
+    for i, (n, v) in enumerate([("Lancia Delta S4", 493), ("Peugeot 205 T16", 550), ("Audi Sport Quattro", 450)], 1):
+        x = f(i, f"{n} produced {v} bhp at peak", f"https://publisher{i}.test/p", page=f"unique page {i} " * 30)
+        fs[x.id] = x
+    hint = detect(list(fs.values()))[0].text()
+    o = OutlineSlide(n=2, section="S", purpose="Compare power", key_message="Power compared", finding_ids=list(fs), layout_hint="CHART_COMMENTARY", data_hint=hint)
+    outline = Outline(arc="timeline", deck_title="D", slides=[o, o.model_copy(update={"n": 3}), o.model_copy(update={"n": 4})])
+    draft = SlideDraft(id="s02", section="S", layout="CHART_COMMENTARY", title="Peak power compared across three cars", bullets=["Peugeot led on output"],
+                       chart_type="bar", chart_title="Approximate peak power (bhp)", categories=["Lancia", "Peugeot", "Audi"],
+                       series=[SeriesDraft(name="bhp", values=[493, 550, 450])], speaker_notes="Figures from the findings.", source_refs=list(fs))
+    llm = FakeLLM({"spec_slide": draft, "faithfulness": {"unsupported": [], "vague": []}, "fixer": {"edits": [], "cite": []}})
+    s = build_slide(llm, Brief(topic="t", audience="a", slide_count=6), o, outline, fs, Path("brand/default_v1"), [], False)
+    assert s.chart and s.chart.series[0].values == [493, 550, 450]
+    assert "DATA HINT: native chart candidate" in llm.calls[0]["prompt"] and "493" in llm.calls[0]["prompt"]
