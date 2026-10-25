@@ -149,17 +149,21 @@ def review_items(spec: DeckSpec, by_id: dict, notes: dict, findings_obj=None) ->
                        + (f" -> kept {c.winner}" if c.winner else " -> excluded from slides, sources differ"))
         out += [f"excluded finding {f.id} ({f.source_url}): {f.excluded_reason} - \"{f.claim[:90]}\"" for f in findings_obj.findings
                 if f.excluded and not any(f.id in c.ids for c in findings_obj.conflicts)]
+    shaky: dict[str, dict] = {}  # reason -> {finding ids, slides}: one line per kind of problem, ids kept so nothing is hidden
     for i, s in enumerate(spec.slides, 1):
         for r in s.source_refs:
             f = by_id.get(r)
             if not f:
                 continue
-            why = [x for x in (f.review_reason, "contradicts another finding (" + ", ".join(f.conflicts_with) + ")" if f.conflicts_with else "",
-                               "low confidence" if f.confidence == "low" else "", "source text contained instruction-like content" if f.flagged else "") if x]
+            why = "; ".join(x for x in (f.review_reason, "contradicts another finding (" + ", ".join(f.conflicts_with) + ")" if f.conflicts_with else "",
+                                        "low confidence" if f.confidence == "low" else "", "source text contained instruction-like content" if f.flagged else "") if x)
             if why:
-                out.append(f"slide {i}, {r} ({f.source_url}): {'; '.join(why)} - \"{f.claim[:110]}\"")
+                g = shaky.setdefault(why, {"ids": {}, "slides": set()})
+                g["ids"][r] = f.source_url
+                g["slides"].add(i)
         if "built directly from the research findings" in s.speaker_notes.lower():
             out.append(f"slide {i}: fallback slide built from raw findings after generation failed; wording is plain by design")
+    out += [f"{len(g['ids'])} finding(s) used on slides {sorted(g['slides'])}: {why} - ids {sorted(g['ids'])} (urls in findings.json)" for why, g in shaky.items()]
     out += [f"slide dropped [{u.get('category', 'evidence')}] ({u['message'][:70]}): {u['reason'][:140]}" for u in notes.get("dropped_unsupported_slides", [])]
     grouped: dict[str, list] = {}
     for w in notes.get("warnings", []):
