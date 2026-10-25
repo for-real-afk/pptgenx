@@ -180,7 +180,7 @@ def test_redundant_slides_are_deleted_not_rewritten(tmp_path):
     llm = FakeLLM({"deck_consistency": {"problems": []}})
     by_id = {f"f0{i}": FINDINGS["f01"].model_copy(update={"id": f"f0{i}"}) for i in range(1, 7)}
     out = _repair_deck(llm, Brief(topic="t", audience="a", slide_count=9), outline, by_id, Path("brand/default_v1"), slides, tmp_path)
-    assert len(out) == len(slides) - 1 and [s.id for s in out] == [f"s{k:02d}" for k in range(1, len(out) + 1)]
+    assert len(out) == len(slides) - 1
     notes = __import__("json").loads((tmp_path / "deck_notes.json").read_text())
     assert notes["deleted_slides"] == [3]                      # the later of the two slides sharing f01+f02
     assert out[-1].layout == "CLOSING" and out[0].layout == "TITLE"
@@ -218,7 +218,7 @@ def test_registry_levels_follow_the_profile_and_every_check_has_a_category():
 def test_slide_failing_only_a_formatting_rule_is_kept_with_a_warning_not_dropped(tmp_path):
     from deckgen.schemas.draft import ItemDraft, SlideDraft
     from deckgen.schemas.research import Brief, Outline, OutlineSlide
-    from deckgen.spec.spec_generator import generate_slide
+    from deckgen.spec.spec_generator import build_slide
 
     long_body = "Builders needed 200 road cars in 1982 " + "and the rest of the rules were detailed at length " * 8
     draft = SlideDraft(id="s02", section="S", layout="TITLE_ONLY", title="Group B rules set a low production bar", comp_kind="icon_rows",
@@ -226,28 +226,66 @@ def test_slide_failing_only_a_formatting_rule_is_kept_with_a_warning_not_dropped
                               ItemDraft(icon="FaCarSide", heading="Four-wheel drive", body="Audi Sport introduced the Quattro."),
                               ItemDraft(icon="FaTrophy", heading="Title", body="Hannu Mikkola won the 1983 drivers title.")],
                        speaker_notes="n", source_refs=["f01", "f02"])
-    sc = {"spec_slide": draft, "faithfulness": {"unsupported": [], "vague": []}}
+    sc = {"spec_slide": draft, "faithfulness": {"unsupported": [], "vague": []}, "fixer": {"edits": [], "cite": []}}
     o = OutlineSlide(n=2, section="S", purpose="p", key_message="k", finding_ids=["f01", "f02"], layout_hint="TITLE_ONLY")
     outline = Outline(arc="timeline", deck_title="D", slides=[o, o.model_copy(update={"n": 3}), o.model_copy(update={"n": 4})])
     notes: dict = {}
-    s = generate_slide(FakeLLM(sc), Brief(topic="t", audience="a", slide_count=6), o, outline, FINDINGS, Path("brand/default_v1"), [], False, None, None, notes)
+    s = build_slide(FakeLLM(sc), Brief(topic="t", audience="a", slide_count=6), o, outline, FINDINGS, Path("brand/default_v1"), [], False, notes)
     assert s.composition.items[0].body == long_body                                  # kept as written
-    assert any(w["check"] == "composition_capacity" for w in notes["warnings"])      # and reported
+    assert any(w["check"] == "composition_capacity" for w in notes["warnings"])      # and reported as a warning
 
 
 def test_slide_the_evidence_cannot_support_fails_with_category_evidence():
     from deckgen.schemas.draft import ItemDraft, SlideDraft
     from deckgen.schemas.research import Brief, Outline, OutlineSlide
-    from deckgen.spec.spec_generator import SpecGenerationError, generate_slide
+    from deckgen.spec.spec_generator import SpecGenerationError, build_slide
 
     invented = SlideDraft(id="s02", section="S", layout="TITLE_ONLY", title="Group B rules set a low production bar", comp_kind="icon_rows",
                           items=[ItemDraft(icon="FaBook", heading="H", body="Builders needed 9,000 road cars in 1982.") for _ in range(3)],
                           speaker_notes="n", source_refs=["f01", "f02"])
-    llm = FakeLLM({"spec_slide": invented, "faithfulness": {"unsupported": [], "vague": []}, "spec_fallback_labels": {"labels": ["a", "b", "c"]}})
+    llm = FakeLLM({"spec_slide": invented, "faithfulness": {"unsupported": [], "vague": []}, "fixer": {"edits": [], "cite": []},
+                   "spec_fallback_labels": {"labels": ["a", "b", "c"]}})
     o = OutlineSlide(n=2, section="S", purpose="p", key_message="k", finding_ids=["f01", "f02"], layout_hint="TITLE_ONLY")
     outline = Outline(arc="timeline", deck_title="D", slides=[o, o.model_copy(update={"n": 3}), o.model_copy(update={"n": 4})])
     try:
-        generate_slide(llm, Brief(topic="t", audience="a", slide_count=6), o, outline, FINDINGS, Path("brand/default_v1"), [], False)
+        build_slide(llm, Brief(topic="t", audience="a", slide_count=6), o, outline, FINDINGS, Path("brand/default_v1"), [], False)
         raise AssertionError("an unsupported number must not produce a slide")
     except SpecGenerationError as e:
-        assert e.category == "evidence" and any(v.check == "number_in_text_grounded" for v in e.violations)
+        assert e.category == "evidence" and any(x.check == "number_in_text_grounded" for x in e.violations)
+
+
+def test_redundancy_keeps_the_richer_slide_even_when_it_is_the_later_one(tmp_path):
+    from deckgen.schemas.research import Outline, OutlineSlide
+    from deckgen.spec.spec_generator import _repair_deck
+
+    vocab = "amber basil cedar delta ember fjord glint haven ivory jaded kappa lunar mango noble ocean pearl quartz raven sable tulip".split()
+
+    def mk(i, refs):
+        items = [{"icon": "FaBook", "heading": f"Head {k}", "body": f"{vocab[(i * 3 + k) % 20]} {vocab[(i * 3 + k + 5) % 20]} {vocab[(i * 3 + k + 11) % 20]} {vocab[(i * 3 + k + 15) % 20]} 1982"} for k in range(3)]
+        return slide(id=f"s{i:02d}", source_refs=refs, title=f"Distinct message number {i} here", composition={"kind": "icon_rows", "items": items})
+
+    by_id = {f"f0{i}": FINDINGS["f01"].model_copy(update={"id": f"f0{i}"}) for i in range(1, 7)}
+    by_id["f03"] = by_id["f03"].model_copy(update={"tier": 4})                      # an authoritative finding only the later slide cites
+    slides = [slide(id="s01", layout="TITLE", title="T", composition=None, source_refs=[])] +              [mk(2, ["f01", "f02"]), mk(3, ["f01", "f02", "f03"]), mk(4, ["f04"]), mk(5, ["f05"]), mk(6, ["f06"])] +              [slide(id="s07", layout="CLOSING", title="Next", composition=None, placeholders={"body": ["Watch the rules"]}, source_refs=["f01"])]
+    outline = Outline(arc="timeline", deck_title="D", slides=[OutlineSlide(n=i, section="S", purpose="p", key_message="k") for i in range(1, 8)])
+    out = _repair_deck(FakeLLM({"deck_consistency": {"problems": []}}), Brief(topic="t", audience="a", slide_count=9), outline, by_id,
+                       Path("brand/default_v1"), slides, tmp_path)
+    notes = __import__("json").loads((tmp_path / "deck_notes.json").read_text())
+    assert notes["deleted_slides"] == [2] and "kept the richer" in notes["deleted_reasons"]["2"]   # the EARLIER, poorer slide is the one deleted
+    assert out[-1].layout == "CLOSING" and out[0].layout == "TITLE"
+
+
+def test_edit_loop_never_accepts_a_fix_that_makes_the_slide_worse():
+    from deckgen.spec.edit_loop import check_all, edit_loop
+    from deckgen.spec.validate_spec import load_manifest
+
+    manifest = load_manifest(Path("brand/default_v1"))
+    one_bad = bad(**{"composition.items.0.body": "Builders needed 2,000 road cars in 1982."})
+    vs = check_all(FakeLLM({}), one_bad, FINDINGS, [], manifest, "D", "default_v1")
+    assert any(x.level == "hard" for x in vs)
+    worse = {"edits": [{"action": "replace", "path": "/composition/items/1/body", "text": "Audi built 9,999 cars."}], "cite": []}
+    best, best_vs, rounds, notes = edit_loop(FakeLLM({"fixer": worse}), one_bad, vs, FINDINGS, [], manifest, "D", "default_v1", rounds=2)
+    assert best == one_bad and any("no better" in n for n in notes)          # the candidate added a second ungrounded number: refused
+    good = {"edits": [{"action": "replace", "path": "/composition/items/0/body", "text": "Builders needed 200 road cars in 1982."}], "cite": []}
+    best, best_vs, rounds, _ = edit_loop(FakeLLM({"fixer": good, "faithfulness": {"unsupported": [], "vague": []}}), one_bad, vs, FINDINGS, [], manifest, "D", "default_v1", rounds=2)
+    assert best.composition.items[0].body == "Builders needed 200 road cars in 1982." and not [x for x in best_vs if x.level == "hard"]

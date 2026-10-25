@@ -89,3 +89,13 @@ heading-name check, two-source numbers); fetch full pages for research (6000-cha
 - Failure sequence: retries with specific feedback -> best attempt kept; if only model_compensation rules still fail the slide is KEPT with warnings (never dropped
   or replaced for a formatting rule) -> chart/table degrade -> findings-based fallback -> drop. Every drop carries a category: evidence | rule | model.
 - Run report states the shortfall plainly (requested vs built, drops by category, deleted duplicates, warnings, profile); warnings and drops are in review_before_use.md.
+
+## Round 2, step 4: slide writing as an edit loop
+- `spec/spec_generator.py` rebuilt: the writer gets the WHOLE usable pool (best first, one line each) plus the outline's assigned findings in full, writes ONCE and cites ids.
+  Checks collect violations; `spec/edit_loop.py` applies small targeted diffs (replace with equal/fewer words, delete an item, cite more findings; no net word growth),
+  accepts a candidate only if (hard correctness, hard) does not get worse, keeps the best version, caps rounds (`DECKGEN_FIX_ROUNDS`, default 3).
+- Failure sequence per slide: diffs -> keep with warnings if only formatting rules fail -> chart/table degrade -> findings-based fallback -> drop (category evidence|rule|model).
+- Redundancy repair keeps the RICHER slide (cited-finding weight + concrete statements) and deletes the other, never title/closing/sources, never below the slide floor (6).
+  Contradictions/unclear references are fixed on the later slide with a diff.
+- Closing: forward-looking AND sourced (source_refs required); if the findings cannot support a point it writes fewer bullets; last resort is a closing built from validated titles.
+- Title slide still built from the request. `generate_slide` is gone; `build_slide`/`write_slide` replace it.

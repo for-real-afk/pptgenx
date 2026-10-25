@@ -156,28 +156,30 @@ def test_every_composition_at_max_capacity_fits(tmp_path):
     assert len(soffice.render_deck(out, tmp_path / "r")) == len(slides)
 
 
-def test_faithfulness_feedback_triggers_regeneration(tmp_path):
-    """An unsupported statement is fed back as an error and the slide is regenerated until it passes."""
+def test_unsupported_statement_is_fixed_by_a_targeted_diff_not_a_rewrite():
+    """The fact-checker flags a statement; the fixer proposes a shorter replacement for that one field; the slide is re-checked and kept."""
     from deckgen.schemas.research import Brief
-    from deckgen.spec.spec_generator import generate_slide
+    from deckgen.spec.spec_generator import build_slide
 
     findings = {f"f0{i}": Finding(id=f"f0{i}", question="q", claim=FACT, evidence_snippet="200 cars 450 480 500 hp", source_type="official",
-                                  source_url="https://www.wrc.com/x", retrieved_at="2026-01-01T00:00:00+00:00", confidence="high") for i in (1, 2)}
-    verdicts = iter([{"unsupported": ["Audi won in 1983"]}, {"unsupported": []}])
+                                  source_url=f"https://site{i}.test/x", retrieved_at="2026-01-01T00:00:00+00:00", confidence="high") for i in (1, 2)}
+    verdicts = iter([{"unsupported": ["Audi won in 1983"], "vague": []}, {"unsupported": [], "vague": []}])
     sc = script()
     sc["faithfulness"] = lambda prompt, images: next(verdicts)
+    sc["fixer"] = {"edits": [{"action": "replace", "path": "/composition/items/0/body", "text": "Rule 0: builders needed 200 road cars."}], "cite": []}
     llm = FakeLLM(sc)
     brief = Brief(topic="t", audience="a", slide_count=6)
-    outline = sc["outline"]
-    slide = generate_slide(llm, brief, outline.slides[1], outline, findings, BRAND, [], False)
-    assert slide.id == "s02"
-    assert [c["stage"] for c in llm.calls].count("spec_slide") == 2
-    assert "Audi won in 1983" in llm.calls[2]["prompt"]  # second attempt saw the fact-check feedback
+    slide = build_slide(llm, brief, sc["outline"].slides[1], sc["outline"], findings, BRAND, [], False)
+    stages = [c["stage"] for c in llm.calls]
+    assert stages.count("spec_slide") == 1 and stages.count("fixer") == 1          # written once, fixed once
+    assert slide.composition.items[0].body == "Rule 0: builders needed 200 road cars."
+    assert slide.composition.items[1].body == "Rule 1: builders needed 200 road cars in 1982."  # other fields untouched
+    assert "Audi won in 1983" in next(c["prompt"] for c in llm.calls if c["stage"] == "fixer")
 
 
-def test_exhausted_retries_fall_back_to_grounded_slide():
+def test_exhausted_fixes_fall_back_to_grounded_slide():
     from deckgen.schemas.research import Brief
-    from deckgen.spec.spec_generator import generate_slide
+    from deckgen.spec.spec_generator import build_slide
 
     fs = {f"f0{i}": Finding(id=f"f0{i}", question="q", claim=f"Group B rule number {i} limited weight to 1000 kg",
                             evidence_snippet="weight limit", source_type="official", source_url=f"https://site{i}.test/a",
@@ -190,11 +192,12 @@ def test_exhausted_retries_fall_back_to_grounded_slide():
 
     sc = script()
     sc["spec_slide"] = invents
+    sc["fixer"] = {"edits": [], "cite": []}
     sc["spec_fallback_labels"] = {"labels": ["Weight", "Weight", "Weight"]}
     llm = FakeLLM(sc)
     llm.tracer = Tracer(None)
     o = sc["outline"].slides[1].model_copy(update={"finding_ids": ["f01", "f02", "f03"], "key_message": "Group B capped car weight"})
-    s = generate_slide(llm, Brief(topic="t", audience="a", slide_count=6), o, sc["outline"], fs, BRAND, [], False)
+    s = build_slide(llm, Brief(topic="t", audience="a", slide_count=6), o, sc["outline"], fs, BRAND, [], False)
     assert llm.tracer.attempts["spec_slide_fallback"] == [2]
     assert [i.body for i in s.composition.items] == [f.claim for f in fs.values()]  # verbatim claims: grounded by construction
 

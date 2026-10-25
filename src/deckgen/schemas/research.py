@@ -98,6 +98,7 @@ class OutlineSlide(_M):
     key_message: str
     finding_ids: list[str] = Field(default_factory=list)
     layout_hint: str = ""
+    data_hint: str = ""  # optional: candidate table/chart rows or comparable numbers found in the findings (ids), see research/shapes.py
 
 
 class Outline(_M):
