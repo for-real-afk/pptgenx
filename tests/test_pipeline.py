@@ -29,7 +29,7 @@ DOMAINS = ["www.wrc.com", "www.topgear.com"]
 
 class Search:
     def search(self, query, max_results):
-        return [SearchResult(title=f"Page {i}", url=f"https://{DOMAINS[i]}/p/{query[-1]}{i}", snippet="s", content=("filler text. " * 60), score=1.0 - i / 10)
+        return [SearchResult(title=f"Page {i}", url=f"https://{DOMAINS[i]}/p/{query[-1]}{i}", snippet="s", content=" ".join(f"page{query[-1]}{i}w{k}" for k in range(120)) + (" filler text." * 30), score=1.0 - i / 10)
                 for i in range(2)]
 
 
@@ -46,7 +46,7 @@ def extract(prompt, images):
 def slide_draft(prompt, images):
     n = int(re.search(r"id=s(\d\d)", prompt).group(1))
     base = dict(id=f"s{n:02d}", section="S", speaker_notes="Detail goes here. It has two sentences.",
-                source_refs={2: ["f01", "f02"], 3: ["f03", "f04"], 4: ["f05", "f06"]}.get(n, ["f01"]))
+                source_refs={2: ["f01", "f02"], 3: ["f03", "f04"], 4: ["f05", "f06"]}.get(n, ["f01", "f02"]))
     if n == 1:
         return SlideDraft(**{**base, "source_refs": []}, layout="TITLE", title="Group B in brief", subtitle="Rules, cars and the ban")
     if n == 2:
@@ -69,12 +69,13 @@ def script():
         "research_query": lambda prompt, images: QueryPlan(queries=["group b q" + re.search(r"question (\d)", prompt).group(1)]),
         "research_extract": extract,
         "research_crosscheck": ConflictReport(links=[]),
+        "research_conflict_pairs": {"contradictions": []},
         "outline": Outline(arc="rise-peak-fall-legacy", deck_title="Group B in brief", slides=[
             OutlineSlide(n=1, section="Open", purpose="Title", key_message="Intro", layout_hint="TITLE"),
             OutlineSlide(n=2, section="Open", purpose="Ideas", key_message="Ideas", finding_ids=["f01", "f02"], layout_hint="TITLE_ONLY"),
             OutlineSlide(n=3, section="Cars", purpose="Power", key_message="Power", finding_ids=["f03", "f04"], layout_hint="CHART_COMMENTARY"),
             OutlineSlide(n=4, section="Cars", purpose="Dates", key_message="Dates", finding_ids=["f05", "f06"], layout_hint="TITLE_ONLY"),
-            OutlineSlide(n=5, section="End", purpose="Close", key_message="Close", finding_ids=["f01"], layout_hint="CLOSING")]),
+            OutlineSlide(n=5, section="End", purpose="Close", key_message="Close", finding_ids=["f01", "f02"], layout_hint="CLOSING")]),
         "spec_slide": slide_draft,
         "faithfulness": {"unsupported": []},
         "deck_consistency": {"problems": []},

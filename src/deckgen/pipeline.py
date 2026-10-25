@@ -15,6 +15,7 @@ from deckgen.planning import outliner, planner
 from deckgen.qa import fix_loop, policy, soffice, validate_pptx
 from deckgen.research.agent import run_research
 from deckgen.research.tools import ResearchTools
+from deckgen.research.weigh import TierTable
 from deckgen.schemas import DeckSpec
 from deckgen.schemas.qa import QAReport
 from deckgen.schemas.research import Brief, Findings, Outline
@@ -31,6 +32,7 @@ class Request:
     audience: str
     slides: int
     brand: str = "default_v1"
+    tier_overrides: str | None = None  # name of config/tier_overrides/<name>.json (per-topic source tiers; config only)
 
 
 def slug(s: str) -> str:
@@ -62,10 +64,10 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
 
     brief = stage("plan", run_dir / "brief.json", Brief,
                   lambda: planner.plan(llm, req.topic, req.audience, req.slides, req.brand))
-    findings = stage("research", run_dir / "findings.json", Findings, lambda: run_research(llm, tools, brief))
+    findings = stage("research", run_dir / "findings.json", Findings, lambda: run_research(llm, tools, brief, TierTable(CONFIG.root / "config" / "tier_overrides" / f"{req.tier_overrides}.json" if req.tier_overrides else None)))
     if len(findings.findings) < max(6, brief.slide_count // 2):
         raise RuntimeError(f"research produced only {len(findings.findings)} findings; not enough for {brief.slide_count} slides")
-    ids = {f.id for f in findings.findings}
+    ids = {f.id for f in findings.findings if not f.excluded}
     outline = stage("outline", run_dir / "outline.json", Outline, lambda: outliner.approve(
         outliner.outline(llm, brief, findings), brief, ids, run_dir / "outline.json", auto_approve, confirm, edit))
     spec = stage("spec", run_dir / "deck_spec.json", DeckSpec, lambda: generate_spec(llm, brief, outline, findings, brand_dir, run_dir))
@@ -107,7 +109,7 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
     deck_notes = json.loads(notes_path.read_text(encoding="utf-8")) if notes_path.exists() else {}
     report = {
         "coverage": coverage(brief, findings.findings, spec), "quality": quality_metrics(spec, req.slides),
-        "review_before_use": review_items(spec, by_id, deck_notes),
+        "review_before_use": review_items(spec, by_id, deck_notes, findings),
         "deck_problems_unresolved": deck_notes.get("unresolved", []), "deck_problems_repaired_slides": deck_notes.get("repaired_slides", []),
         "run_id": run_dir.name, "topic": req.topic, "slides": len(spec.slides), "findings": len(findings.findings),
         "findings_used": len(used_ids), "research_stats": findings.stats, "stage_seconds": timings,
@@ -132,9 +134,15 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
     return report
 
 
-def review_items(spec: DeckSpec, by_id: dict, notes: dict) -> list[str]:
+def review_items(spec: DeckSpec, by_id: dict, notes: dict, findings_obj=None) -> list[str]:
     """What a human should check before using the deck: shaky findings actually on slides, contested numbers, unresolved problems."""
     out = []
+    if findings_obj is not None:
+        for c in findings_obj.conflicts:
+            out.append(f"CONFLICT {c.status} ({', '.join(c.ids)}): " + " VS ".join(f'"{t[:90]}" <{u}>' for t, u in zip(c.claims, c.sources))
+                       + (f" -> kept {c.winner}" if c.winner else " -> excluded from slides, sources differ"))
+        out += [f"excluded finding {f.id} ({f.source_url}): {f.excluded_reason} - \"{f.claim[:90]}\"" for f in findings_obj.findings
+                if f.excluded and not any(f.id in c.ids for c in findings_obj.conflicts)]
     for i, s in enumerate(spec.slides, 1):
         for r in s.source_refs:
             f = by_id.get(r)

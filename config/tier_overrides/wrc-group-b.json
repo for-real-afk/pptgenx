@@ -1,0 +1,7 @@
+{
+  "_comment": "Per-topic override for the WRC Group B regression topic: bodies and publishers that are primary for this subject. Config only; no code knows about it.",
+  "rules": [
+    {"tier": 4, "domains": ["fia.com", "wrc.com", "historicdb.fia.com"]},
+    {"tier": 3, "domains": ["motorsport.com", "autosport.com", "topgear.com", "dirtfish.com", "motorsportmemorial.org"]}
+  ]
+}

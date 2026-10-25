@@ -43,10 +43,27 @@ class Finding(_M):
     corroborated_by: int = 1  # independent websites stating the same thing (including this one)
     needs_review: bool = False  # strong claim resting on one non-official source: attribute it, and a human should check
     review_reason: str = ""
+    tier: int = 1  # source tier: 4 primary/official, 3 reputable, 2 general reference, 1 blog/vendor/unknown, 0 noise
+    origin_id: str = ""  # mirrors, republished copies and same-publisher pages collapse into one origin
+    independent_origin_count: int = 1  # independent origins stating the same thing (self-sourced vendor pages do not count)
+    self_sourced: bool = False  # a vendor-like page making claims about itself
+    excluded: bool = False  # outweighed or contested: never used on slides, listed in review_before_use.md
+    excluded_reason: str = ""
+    page_sig: list[int] = Field(default_factory=list)  # MinHash of the source page, for origin clustering
+
+
+class ConflictRecord(_M):
+    ids: list[str]
+    claims: list[str]
+    sources: list[str]
+    status: Literal["resolved", "unresolved"]
+    winner: str = ""
+    reason: str = ""
 
 
 class Findings(_M):
     findings: list[Finding]
+    conflicts: list[ConflictRecord] = Field(default_factory=list)
     stats: dict[str, int] = Field(default_factory=dict)  # tool calls, pages, cache hits, flagged pages
 
 
@@ -62,7 +79,7 @@ class RawFindings(_M):
 
 
 class QueryPlan(_M):
-    queries: list[str] = Field(min_length=1, max_length=2)
+    queries: list[str] = Field(min_length=1, max_length=3)
 
 
 class ConflictLink(_M):
@@ -87,3 +104,13 @@ class Outline(_M):
     arc: str
     deck_title: str
     slides: list[OutlineSlide] = Field(min_length=3)
+
+
+class PairRef(_M):
+    a: str
+    b: str
+
+
+class PairVerdicts(_M):
+    """LLM output: which candidate pairs state the SAME fact with incompatible values."""
+    contradictions: list[PairRef] = Field(default_factory=list)

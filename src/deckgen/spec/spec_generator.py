@@ -216,11 +216,7 @@ def _fallback_slide(llm: LLM, o: OutlineSlide, cited: list[Finding], findings: d
 def generate_spec(llm: LLM, brief: Brief, outline: Outline, findings: Findings, brand_dir: Path,
                   run_dir: Path | None = None) -> DeckSpec:
     by_id = {f.id: f for f in findings.findings}
-    # a finding outvoted by what it conflicts with (fewer independent sites, or a lower source tier) is not used on slides
-    tier = {"official": 3, "archive": 3, "journalism": 2, "encyclopedia": 2, "manufacturer": 1, "other": 1}
-    outvoted = {f.id for f in findings.findings if any(
-        c in by_id and (by_id[c].corroborated_by, tier[by_id[c].source_type]) > (f.corroborated_by, tier[f.source_type]) for c in f.conflicts_with)}
-    by_id = {k: v for k, v in by_id.items() if k not in outvoted}
+    by_id = {k: v for k, v in by_id.items() if not v.excluded}  # outweighed or contested findings never reach slides (research/weigh.py)
     slides: list[SlideSpec] = []
     unsupported: list[dict] = []
     for o in outline.slides:

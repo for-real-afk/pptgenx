@@ -1,0 +1,10 @@
+{
+  "_comment": "Topic-independent defaults. Tier 4 primary/official, 3 reputable reference and journalism, 2 general reference, 1 blogs/vendors/unknown, 0 excluded noise. Per-topic overrides live in config/tier_overrides/<name>.json and are selected in the golden-topics file or DECKGEN_TIER_OVERRIDES.",
+  "default_tier": 1,
+  "rules": [
+    {"tier": 0, "contains": ["forum", "reddit.", "quora.", "pinterest.", "instagram.", "youtube.", "youtu.be", "tiktok.", "twitter.", "x.com", "facebook.", "ukessays", "studocu", "scribd", "answers."]},
+    {"tier": 4, "suffixes": [".gov", ".mil", ".edu", ".int", ".gov.uk", ".ac.uk", ".europa.eu"], "domains": ["who.int", "un.org", "oecd.org", "worldbank.org", "nih.gov", "ncbi.nlm.nih.gov", "nature.com", "science.org", "cdc.gov", "nasa.gov", "archive.org", "loc.gov", "archives.gov"]},
+    {"tier": 3, "domains": ["britannica.com", "reuters.com", "apnews.com", "bbc.com", "bbc.co.uk", "nytimes.com", "theguardian.com", "washingtonpost.com", "economist.com", "ft.com", "wsj.com", "smithsonianmag.com", "history.com", "jstor.org", "sciencedirect.com", "hbr.org", "mckinsey.com", "bloomberg.com", "npr.org", "pbs.org", "nationalgeographic.com"]},
+    {"tier": 2, "domains": ["wikipedia.org", "wikimedia.org", "investopedia.com", "businessinsider.com", "forbes.com", "cnbc.com", "wired.com", "techcrunch.com", "arstechnica.com"]}
+  ]
+}

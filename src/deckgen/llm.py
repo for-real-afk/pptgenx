@@ -26,7 +26,7 @@ ROLES = ("extractor", "writer", "checker", "critic")
 STAGE_ROLE = {
     "plan": "writer", "outline": "writer", "spec_slide": "writer", "spec_fallback_labels": "writer", "fixer": "writer",
     "research_query": "extractor", "research_extract": "extractor",
-    "research_crosscheck": "checker", "faithfulness": "checker", "deck_consistency": "checker",
+    "research_crosscheck": "checker", "research_conflict_pairs": "checker", "faithfulness": "checker", "deck_consistency": "checker",
     "critic": "critic", "critic_consistency": "critic",
 }
 

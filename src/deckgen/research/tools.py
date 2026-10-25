@@ -79,7 +79,7 @@ class TavilySearch:
                        json={"query": query, "max_results": max_results, "search_depth": "basic", "include_raw_content": "text"})
         r.raise_for_status()
         return [SearchResult(title=x.get("title", ""), url=x["url"], snippet=x.get("content", ""),
-                             content=(x.get("raw_content") or "")[:20000], score=x.get("score", 0.0))
+                             content=(x.get("raw_content") or "")[:200000], score=x.get("score", 0.0))
                 for x in r.json().get("results", [])]
 
 

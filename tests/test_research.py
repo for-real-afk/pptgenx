@@ -105,7 +105,7 @@ def test_meta_findings_filtered_and_source_types():
     assert is_meta("The provided text does not mention the 1986 ban")
     assert not is_meta("Group B was banned after 1986")
     assert source_type("https://en.wikipedia.org/wiki/Group_B") == "encyclopedia"
-    assert source_type("https://www.fia.com/x") == "official"
+    assert source_type("https://history.agency.gov/x") == "official"
     assert source_type("https://random.example/x") == "other"
 
 
@@ -116,25 +116,25 @@ def _f(i, claim, url, typ="journalism"):
                    retrieved_at="2026-01-01T00:00:00+00:00", confidence="high")
 
 
-def test_corroboration_and_single_source_strong_claims():
-    from deckgen.research.agent import corroborate
+def test_corroboration_counts_independent_origins_and_flags_single_low_tier_claims():
+    from deckgen.research.weigh import TierTable, assign_tiers_origins, corroborate, mark_review
 
-    fs = corroborate([
+    fs = mark_review(corroborate(assign_tiers_origins([
         _f(1, "The FIA banned Group B cars from the 1987 season after the fatal crash", "https://a.com/x"),
         _f(2, "FIA banned Group B cars for the 1987 season following the fatal accident", "https://b.org/y"),
         _f(3, "FISA concluded that Group B cars were too fast for human reaction times", "https://c.net/z"),
-        _f(4, "Group B allowed 200 homologation units", "https://fia.com/q", "official"),
-    ])
-    assert fs[0].corroborated_by == 2 and not fs[0].needs_review and not fs[1].needs_review
-    assert fs[2].needs_review and fs[2].review_reason          # single non-official source, strong wording
-    assert not fs[3].needs_review                              # official source: no flag
+        _f(4, "Group B allowed 200 homologation units", "https://history.agency.gov/q", "official"),
+    ], TierTable())))
+    assert fs[0].independent_origin_count == 2 and not fs[0].needs_review and not fs[1].needs_review
+    assert fs[2].needs_review and fs[2].review_reason          # one low-tier origin, strong wording
+    assert fs[3].tier == 4 and not fs[3].needs_review          # official source: no flag
 
 
 def test_thin_questions_get_a_follow_up_search():
     llm_queries = []
 
     def query(prompt, images):
-        q = "authoritative rewording" if "A first search found little" in prompt else "first wording"
+        q = "authoritative rewording" if "Earlier searches found little" in prompt else "first wording"
         llm_queries.append(q)
         return QueryPlan(queries=[q])
 
@@ -145,12 +145,12 @@ def test_thin_questions_get_a_follow_up_search():
 
     llm = FakeLLM({"research_query": query, "research_extract": lambda p, i: RawFindings(findings=[RawFinding(
         claim="Group B required 200 road cars from 1982", evidence_snippet="200 cars", confidence="high")]),
-        "research_crosscheck": ConflictReport(links=[])})
+        "research_crosscheck": ConflictReport(links=[]), "research_conflict_pairs": {"contradictions": []}})
     search = Pick()
     tools = ResearchTools(search, NoFetch(), Budget(40, 20, 120, 40))
     res = run_research(llm, tools, brief(1))
     assert "first wording" in search.queries and "authoritative rewording" in search.queries
-    assert res.findings and res.stats["followup_questions"] == 1
+    assert res.findings and res.stats["followup_questions"] >= 1
 
 
 def test_wikipedia_references_are_followed_but_junk_is_not():

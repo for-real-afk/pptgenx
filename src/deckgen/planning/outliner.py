@@ -81,9 +81,9 @@ def repair_outline(o: Outline) -> tuple[Outline, list[str]]:
 def outline(llm: LLM, brief: Brief, findings: Findings, retries: int = 3) -> Outline:
     catalog = "\n".join(
         f"{f.id} [{f.confidence}, {f.corroborated_by} site(s){', SINGLE-SOURCE STRONG CLAIM' if f.needs_review else ''}] {f.claim}"
-        for f in findings.findings)
+        for f in findings.findings if not f.excluded)
     arcs = "\n".join(f"- {k}: {v}" for k, v in ARCS.items())
-    ids = {f.id for f in findings.findings}
+    ids = {f.id for f in findings.findings if not f.excluded}
     want = brief.slide_count - 1
     base = (
         f"Topic: {brief.topic}\nAudience: {brief.audience}\nObjective: {brief.objective}\n\n"

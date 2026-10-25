@@ -66,3 +66,15 @@ heading-name check, two-source numbers); fetch full pages for research (6000-cha
 - `registry.py` + `deckgen checks`: every check tagged correctness | model_compensation with strict/demoted severity. Thresholds moved to config.
 - `deckgen doctor` lists each configured model against the provider's live model list.
 - No GROQ_API_KEY in this environment: Groq adapter is tested with a stubbed HTTP layer only. Live Groq runs wait for the key.
+
+## Round 2, step 2: research depth
+- Full pages (no 6,000-char cut), split into ~1,100-char passages, BM25 selects the 4 most relevant per question before extraction (`research/passages.py`).
+- Rounds until the raw pool reaches `DECKGEN_TARGET_FINDINGS` (default 100) or a hard budget ends them; budgets raised (160 tool calls, 70 pages,
+  1,500 s). 3 queries per question, 6 results each, up to ~8 pages per question; Wikipedia references followed; follow-up rounds reword thin questions.
+- `research/weigh.py`: config-driven tiers (`config/source_tiers.json`, per-topic overrides in `config/tier_overrides/`), origin collapse (same publisher
+  + MinHash near-copies), independent-origin corroboration (self-sourced vendor pages do not count for their own claims), conflict candidates found
+  deterministically (same words, different numbers) and judged by the checker role, resolution by weight (tier, origins, confidence) not count,
+  unresolved conflicts recorded with every value and source and excluded from slides. Excluded findings and conflicts appear in review_before_use.md.
+- Findings now carry tier, origin_id, independent_origin_count, excluded(+reason); research stats report raw/kept/usable/excluded counts, origins, tier histogram.
+- Seeded tests: two copying low-tier pages vs one official finding resolves to the official one; a wrong-year finding is excluded and listed for review.
+- Not yet run live (no Groq key; Gemini quota): the 80-120 raw-findings target is untested against real sources.
