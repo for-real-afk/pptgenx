@@ -154,5 +154,40 @@ def eval_(golden: Path = typer.Option(Path("evals/golden_topics.json")), only: s
     raise typer.Exit(run_all(golden, only))
 
 
+@app.command("experiment")
+def experiment_cmd(
+    base_run: str = typer.Option(..., help="run id under runs/ that holds brief.json + findings.json (the cached research)"),
+    topic: str = typer.Option(None, help="defaults to the base run's brief"),
+    runs: int = typer.Option(3, help="runs per variant"),
+    strong: str = typer.Option("groq:openai/gpt-oss-120b", help="provider:model for the strong writer"),
+    cheap: str = typer.Option("groq:llama-3.3-70b-versatile", help="provider:model for the cheap writer"),
+    baseline: str = typer.Option("", help="optional extra variant G: provider:model (for example the Gemini baseline), gates demoted"),
+    qa: bool = typer.Option(False, "--qa/--no-qa", help="also render and QA each run (slower; needs Docker and the critic role)"),
+) -> None:
+    """Variants A/B/C (strong+strict, cheap+demoted, strong+demoted) over the SAME cached findings; writes runs/experiments/<id>/summary.md."""
+    import time
+
+    from deckgen.experiment import Variant, default_variants, run_experiment
+    from deckgen.llm import Tracer, RoleLLM, parse_role
+    from deckgen.pipeline import Request
+    from deckgen.schemas.research import Brief
+
+    base = CONFIG.runs_dir / base_run
+    brief = Brief.model_validate_json((base / "brief.json").read_text(encoding="utf-8"))
+    req = Request(topic or brief.topic, brief.audience, brief.slide_count, brief.brand)
+    variants = default_variants(strong, cheap) + ([Variant("G", baseline, "demoted", "baseline writer, gates demoted")] if baseline else [])
+
+    def make(var, rd):
+        roles = CONFIG.build_roles()
+        if var.writer:
+            roles["writer"] = parse_role(var.writer, temperature=roles["writer"].temperature, max_tokens=roles["writer"].max_tokens, seed=7)
+        return RoleLLM(roles, Tracer(rd / "trace.jsonl"), use_cache=False)  # no cache: repeated runs must be real samples
+
+    out = CONFIG.runs_dir / "experiments" / f"{base_run}-{time.strftime('%m%d-%H%M')}"
+    run_experiment(base, req, variants, runs, make, out, do_qa=qa)
+    typer.echo((out / "summary.md").read_text(encoding="utf-8"))
+    typer.echo(chr(10) + f"summary: {out / 'summary.md'}")
+
+
 if __name__ == "__main__":
     app()

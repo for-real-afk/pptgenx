@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from deckgen import registry
 from deckgen.config import CONFIG
 from deckgen.llm import LLM, Tracer
 from deckgen.planning import outliner, planner
@@ -111,7 +112,10 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
         "coverage": coverage(brief, findings.findings, spec), "quality": quality_metrics(spec, req.slides),
         "review_before_use": review_items(spec, by_id, deck_notes, findings),
         "shortfall": shortfall(req.slides, spec, deck_notes),
-        "gate_profile": CONFIG.gate_profile,
+        "gate_profile": registry.active_profile(),
+        "fallback_slides": len(deck_notes.get("fallbacks", [])),
+        "redundancy": {"unresolved": sum(p["kind"] == "redundancy" for p in deck_notes.get("unresolved", [])),
+                       "deleted": len(deck_notes.get("deleted_slides", []))},
         "deck_problems_unresolved": deck_notes.get("unresolved", []), "deck_problems_repaired_slides": deck_notes.get("repaired_slides", []),
         "run_id": run_dir.name, "topic": req.topic, "slides": len(spec.slides), "findings": len(findings.findings),
         "findings_used": len(used_ids), "research_stats": findings.stats, "stage_seconds": timings,

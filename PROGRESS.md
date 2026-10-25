@@ -105,3 +105,11 @@ heading-name check, two-source numbers); fetch full pages for research (6000-cha
   Hints go to the outliner prompt; `attach()` gives each CHART_COMMENTARY/TABLE outline slide its best-matching hint as `data_hint`; the writer prompt shows it
   ("use only these values; cite their ids"). Grounding rules still require every chart/table number to appear in the cited findings and two independent origins.
 - Numbers are kept consistent across slides by sourcing both from the same findings plus the existing LLM contradiction pass (no new check type).
+
+## Round 2, step 6: experiment harness
+- `deckgen experiment --base-run <run id with brief.json + findings.json> --runs 3 [--strong groq:openai/gpt-oss-120b] [--cheap groq:llama-3.3-70b-versatile]
+  [--baseline gemini:...] [--qa]`: variants A (strong + strict), B (cheap + demoted), C (strong + demoted) over the SAME cached findings, fresh outline + spec each run,
+  LLM cache off so repeats are real samples. Per-run metrics and `runs/experiments/<id>/summary.md` (slides built mean/per-run/spread, blocking, unsourced,
+  specificity, distinct evidence, redundant pairs, fallbacks, warnings, review length, first-attempt pass, calls, tokens, failed runs).
+- Gate profile switches per variant at runtime (`registry.use_profile`). Tested offline with scripted fakes. NOT run live: no GROQ_API_KEY here.
+- Cost in currency is not computed (no price table); tokens and calls are reported.

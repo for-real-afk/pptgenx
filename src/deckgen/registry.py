@@ -81,9 +81,29 @@ CHECKS: list[Check] = [
 BY_ID = {c.id: c for c in CHECKS}
 
 
+_override: list[str] = []
+
+
+class use_profile:
+    """Context manager: run a block under another gate profile (experiments compare profiles in one process)."""
+
+    def __init__(self, profile: str):
+        self.profile = profile
+
+    def __enter__(self):
+        _override.append(self.profile)
+
+    def __exit__(self, *exc):
+        _override.pop()
+
+
+def active_profile() -> str:
+    return _override[-1] if _override else CONFIG.gate_profile
+
+
 def level(check_id: str, profile: str | None = None) -> str:
     c = BY_ID[check_id]
-    return c.demoted if (profile or CONFIG.gate_profile) == "demoted" else c.strict
+    return c.demoted if (profile or active_profile()) == "demoted" else c.strict
 
 
 def table(profile: str | None = None) -> str:
