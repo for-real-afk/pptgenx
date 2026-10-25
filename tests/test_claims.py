@@ -67,10 +67,16 @@ def test_seeded_bad_claim_is_flagged(name):
     assert check_slide(SEEDS[name], FINDINGS, []), f"seed not caught: {name}"
 
 
-def test_verbatim_copy_flagged():
-    f = {**FINDINGS, "f01": FINDINGS["f01"].model_copy(update={"evidence_snippet": "builders needed 200 road cars in 1982 under the new rules"})}
-    s = bad(**{"composition.items.0.body": "Builders needed 200 road cars in 1982 under the new rules"})
-    assert any("copies source wording" in e for e in claim_errors(s, f))
+def test_verbatim_copy_is_a_warning_when_short_and_a_hard_gate_when_long():
+    from deckgen.spec.claims import claim_violations
+
+    short = "builders needed 200 road cars in 1982 under the new rules"                       # 11 words
+    long_ = short + " and every one of them had to be sold to the public in showrooms"           # 22 words
+    f = lambda snip: {**FINDINGS, "f01": FINDINGS["f01"].model_copy(update={"evidence_snippet": snip})}
+    vs = claim_violations(bad(**{"composition.items.0.body": short.capitalize()}), f(short))
+    assert [(x.check, x.level) for x in vs if x.check.startswith("copy")] == [("copy_short", "warn")]
+    vs = claim_violations(bad(**{"composition.items.0.body": long_.capitalize()}), f(long_))
+    assert ("copy_long", "hard") in [(x.check, x.level) for x in vs]
 
 
 def test_vendor_only_numbers_rejected_but_two_sources_pass():
@@ -189,3 +195,59 @@ def test_title_slide_comes_from_the_request_not_findings():
     o = Outline(arc="timeline", deck_title="Group B", slides=[OutlineSlide(n=i, section="S", purpose="p", key_message="k") for i in (1, 2, 3)])
     s = title_slide(brief, o, o.slides[0])
     assert s.title == brief.topic and s.placeholders["subtitle"] == brief.objective and s.source_refs == []
+
+
+# ---- gate profiles: hard gates vs warnings ----------------------------------------------------------------------------------
+def test_registry_levels_follow_the_profile_and_every_check_has_a_category():
+    from deckgen import registry
+
+    assert registry.level("copy_short", "strict") == "hard" and registry.level("copy_short", "demoted") == "warn"
+    assert registry.level("overclaim_word", "demoted") == "hard" and registry.level("deck_contradiction", "demoted") == "hard"
+    assert registry.level("composition_capacity", "demoted") == "warn" and registry.level("numbers_need_two_origins_text", "demoted") == "warn"
+    assert registry.level("numbers_need_two_origins_stat", "demoted") == "hard"
+    assert all(c.category in ("correctness", "model_compensation") for c in registry.CHECKS)
+    from deckgen.spec import claims, rules, validate_spec, faithfulness
+    import re
+
+    used = set()
+    for mod in (claims, rules, validate_spec, faithfulness):
+        used |= set(re.findall(r'v\("([a-z_]+)"', Path(mod.__file__).read_text(encoding="utf-8")))
+    assert used <= set(registry.BY_ID), f"checks used in code but missing from the registry: {used - set(registry.BY_ID)}"
+
+
+def test_slide_failing_only_a_formatting_rule_is_kept_with_a_warning_not_dropped(tmp_path):
+    from deckgen.schemas.draft import ItemDraft, SlideDraft
+    from deckgen.schemas.research import Brief, Outline, OutlineSlide
+    from deckgen.spec.spec_generator import generate_slide
+
+    long_body = "Builders needed 200 road cars in 1982 " + "and the rest of the rules were detailed at length " * 8
+    draft = SlideDraft(id="s02", section="S", layout="TITLE_ONLY", title="Group B rules set a low production bar", comp_kind="icon_rows",
+                       items=[ItemDraft(icon="FaBook", heading="Homologation", body=long_body),
+                              ItemDraft(icon="FaCarSide", heading="Four-wheel drive", body="Audi Sport introduced the Quattro."),
+                              ItemDraft(icon="FaTrophy", heading="Title", body="Hannu Mikkola won the 1983 drivers title.")],
+                       speaker_notes="n", source_refs=["f01", "f02"])
+    sc = {"spec_slide": draft, "faithfulness": {"unsupported": [], "vague": []}}
+    o = OutlineSlide(n=2, section="S", purpose="p", key_message="k", finding_ids=["f01", "f02"], layout_hint="TITLE_ONLY")
+    outline = Outline(arc="timeline", deck_title="D", slides=[o, o.model_copy(update={"n": 3}), o.model_copy(update={"n": 4})])
+    notes: dict = {}
+    s = generate_slide(FakeLLM(sc), Brief(topic="t", audience="a", slide_count=6), o, outline, FINDINGS, Path("brand/default_v1"), [], False, None, None, notes)
+    assert s.composition.items[0].body == long_body                                  # kept as written
+    assert any(w["check"] == "composition_capacity" for w in notes["warnings"])      # and reported
+
+
+def test_slide_the_evidence_cannot_support_fails_with_category_evidence():
+    from deckgen.schemas.draft import ItemDraft, SlideDraft
+    from deckgen.schemas.research import Brief, Outline, OutlineSlide
+    from deckgen.spec.spec_generator import SpecGenerationError, generate_slide
+
+    invented = SlideDraft(id="s02", section="S", layout="TITLE_ONLY", title="Group B rules set a low production bar", comp_kind="icon_rows",
+                          items=[ItemDraft(icon="FaBook", heading="H", body="Builders needed 9,000 road cars in 1982.") for _ in range(3)],
+                          speaker_notes="n", source_refs=["f01", "f02"])
+    llm = FakeLLM({"spec_slide": invented, "faithfulness": {"unsupported": [], "vague": []}, "spec_fallback_labels": {"labels": ["a", "b", "c"]}})
+    o = OutlineSlide(n=2, section="S", purpose="p", key_message="k", finding_ids=["f01", "f02"], layout_hint="TITLE_ONLY")
+    outline = Outline(arc="timeline", deck_title="D", slides=[o, o.model_copy(update={"n": 3}), o.model_copy(update={"n": 4})])
+    try:
+        generate_slide(llm, Brief(topic="t", audience="a", slide_count=6), o, outline, FINDINGS, Path("brand/default_v1"), [], False)
+        raise AssertionError("an unsupported number must not produce a slide")
+    except SpecGenerationError as e:
+        assert e.category == "evidence" and any(v.check == "number_in_text_grounded" for v in e.violations)

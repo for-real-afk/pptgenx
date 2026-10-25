@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from deckgen.llm import LLM
 from deckgen.schemas import SlideSpec
 from deckgen.schemas.research import Finding
+from deckgen.spec.violations import Violation, v
 
 SYSTEM = "You are a strict fact-checker. You compare slide text to source findings. Output JSON only."
 
@@ -24,7 +25,7 @@ def slide_text(s: SlideSpec) -> str:
     return str(d)
 
 
-def check_slide_text(llm: LLM, s: SlideSpec, cited: list[Finding]) -> list[str]:
+def check_slide_text(llm: LLM, s: SlideSpec, cited: list[Finding]) -> list[Violation]:
     facts = "\n".join(f"{f.id}: {f.claim} (evidence: {f.evidence_snippet})" for f in cited)
     prompt = (
         f"FINDINGS:\n{facts}\n\nSLIDE (visible text and data):\n{slide_text(s)}\n\n"
@@ -36,11 +37,11 @@ def check_slide_text(llm: LLM, s: SlideSpec, cited: list[Finding]) -> list[str]:
         "could not guess from the title (empty praise or filler such as 'a lasting benchmark', 'changed the landscape'). "
         "Return empty lists if everything is supported and concrete."
     )
-    v = llm.generate(stage="faithfulness", system=SYSTEM, prompt=prompt, schema=Verdict)
-    return ([f"not supported by the cited findings, remove or replace with what the findings say: {b}" for b in v.unsupported[:6]]
-            + [f"too vague, replace with a concrete fact (number, name, date, event) from the findings or spare findings: {b}" for b in v.vague[:4]])
+    v_ = llm.generate(stage="faithfulness", system=SYSTEM, prompt=prompt, schema=Verdict)
+    return ([v("faithfulness_unsupported", f"not supported by the cited findings, remove or replace with what the findings say: {b}") for b in v_.unsupported[:6]]
+            + [v("faithfulness_vague", f"too vague, replace with a concrete fact (number, name, date, event) from the findings or spare findings: {b}") for b in v_.vague[:4]])
 
 
 def unsupported_statements(llm: LLM, s: SlideSpec, cited: list[Finding]) -> list[str]:
     """Back-compat name used by tests: the raw feedback strings."""
-    return check_slide_text(llm, s, cited)
+    return [x.message for x in check_slide_text(llm, s, cited)]

@@ -78,3 +78,14 @@ heading-name check, two-source numbers); fetch full pages for research (6000-cha
 - Findings now carry tier, origin_id, independent_origin_count, excluded(+reason); research stats report raw/kept/usable/excluded counts, origins, tier histogram.
 - Seeded tests: two copying low-tier pages vs one official finding resolves to the official one; a wrong-year finding is excluded and listed for review.
 - Not yet run live (no Groq key; Gemini quota): the 80-120 raw-findings target is untested against real sources.
+
+## Round 2, step 3: hard gates vs warnings
+- `spec/violations.py`: every failed check is a Violation (registry id, message, level from the gate profile). `DECKGEN_GATES=strict|demoted`
+  (default demoted). rules/claims/validate_spec/faithfulness all emit violations; old string-returning functions remain as wrappers.
+- Hard in both profiles: contradictions, ungrounded numbers/names/dates/titles, overclaim words, outvoted findings, invalid layout/placeholders, overflow,
+  verbatim copying of 15+ words, stat/chart numbers without two independent origins or one authoritative origin.
+- Demoted to warnings: copy 8-14 words, specificity, numbers-in-text two-origin rule, attribution of shaky claims, vague statements, capacity/length rules, variety,
+  timeline label, notes. Headings and labels are exempt from the invented-name check. Item minimum is 2.
+- Failure sequence: retries with specific feedback -> best attempt kept; if only model_compensation rules still fail the slide is KEPT with warnings (never dropped
+  or replaced for a formatting rule) -> chart/table degrade -> findings-based fallback -> drop. Every drop carries a category: evidence | rule | model.
+- Run report states the shortfall plainly (requested vs built, drops by category, deleted duplicates, warnings, profile); warnings and drops are in review_before_use.md.

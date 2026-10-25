@@ -83,7 +83,7 @@ def run_qa(spec: DeckSpec, brand_dir: Path, run_dir: Path, llm: LLM, fixer: Fixe
            max_rounds: int | None = None) -> tuple[DeckSpec, QAReport]:
     max_rounds = CONFIG.qa_max_rounds if max_rounds is None else max_rounds
     report = QAReport()
-    if errs := validate_spec(spec, load_manifest(brand_dir)):
+    if errs := validate_spec(spec, load_manifest(brand_dir), hard_only=True):
         report.file_errors = errs
         return spec, report
     all_slides = list(range(1, len(spec.slides) + 1))

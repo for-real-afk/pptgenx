@@ -31,6 +31,8 @@ CHECKS: list[Check] = [
     Check("layout_valid", C, "hard", "hard", "spec/validate_spec.py", "layout name exists in the brand manifest"),
     Check("placeholder_valid", C, "hard", "hard", "spec/validate_spec.py", "placeholder names exist on the layout"),
     Check("manifest_max_chars", M, "hard", "warn", "spec/validate_spec.py", "placeholder text within the layout's estimated capacity (true overflow is caught after render)"),
+    Check("title_states_message", M, "hard", "warn", "spec/rules.py", "titles state the message (at least 4 words)"),
+    Check("icon_valid", C, "hard", "hard", "spec/rules.py", "icons exist in react-icons"),
     Check("layout_needs_content", C, "hard", "hard", "spec/rules.py", "CHART/TABLE/TITLE_ONLY layouts carry their chart, table or composition"),
     # --- provenance and grounding (spec/rules.py, spec/claims.py)
     Check("source_refs_present", C, "hard", "hard", "spec/rules.py", "content slides cite findings, and every cited id exists"),

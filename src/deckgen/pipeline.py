@@ -110,6 +110,8 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
     report = {
         "coverage": coverage(brief, findings.findings, spec), "quality": quality_metrics(spec, req.slides),
         "review_before_use": review_items(spec, by_id, deck_notes, findings),
+        "shortfall": shortfall(req.slides, spec, deck_notes),
+        "gate_profile": CONFIG.gate_profile,
         "deck_problems_unresolved": deck_notes.get("unresolved", []), "deck_problems_repaired_slides": deck_notes.get("repaired_slides", []),
         "run_id": run_dir.name, "topic": req.topic, "slides": len(spec.slides), "findings": len(findings.findings),
         "findings_used": len(used_ids), "research_stats": findings.stats, "stage_seconds": timings,
@@ -154,9 +156,20 @@ def review_items(spec: DeckSpec, by_id: dict, notes: dict, findings_obj=None) ->
                 out.append(f"slide {i}, {r} ({f.source_url}): {'; '.join(why)} - \"{f.claim[:110]}\"")
         if "built directly from the research findings" in s.speaker_notes.lower():
             out.append(f"slide {i}: fallback slide built from raw findings after generation failed; wording is plain by design")
-    out += [f"slide dropped, evidence too weak ({u['message'][:70]}): {u['reason'][:140]}" for u in notes.get("dropped_unsupported_slides", [])]
+    out += [f"slide dropped [{u.get('category', 'evidence')}] ({u['message'][:70]}): {u['reason'][:140]}" for u in notes.get("dropped_unsupported_slides", [])]
+    out += [f"warning [{w['check']}] on outline slide {w['outline_slide']}: {w['message']}" for w in notes.get("warnings", [])]
     out += [f"unresolved cross-slide problem on slides {p['slides']}: {p['description']}" for p in notes.get("unresolved", [])]
     return out
+
+
+def shortfall(requested: int, spec: DeckSpec, notes: dict) -> dict:
+    """Plain statement of how much shorter the deck is than asked, and why (drops by category, deleted duplicates)."""
+    drops = notes.get("dropped_unsupported_slides", [])
+    by_cat: dict[str, int] = {}
+    for d in drops:
+        by_cat[d.get("category", "evidence")] = by_cat.get(d.get("category", "evidence"), 0) + 1
+    return {"requested": requested, "built": len(spec.slides), "dropped_by_category": by_cat,
+            "deleted_as_redundant": len(notes.get("deleted_slides", [])), "warnings": len(notes.get("warnings", []))}
 
 
 def quality_metrics(spec: DeckSpec, requested: int) -> dict:
@@ -195,6 +208,8 @@ def report_md(r: dict) -> str:
             "- roles: " + "; ".join(f"{k}: {','.join(v['models'])} ({v['calls']} calls, {v['cache_hits']} cached, waited {v['waited_s']}s)" for k, v in r["roles"].items()),
             f"- budget use: {r['budget']}",
             f"- cross-slide problems repaired on slides {r['deck_problems_repaired_slides']}; unresolved: {r['deck_problems_unresolved'] or 'none'}",
+            f"- shortfall: requested {r['shortfall']['requested']}, built {r['shortfall']['built']}; dropped by category {r['shortfall']['dropped_by_category'] or 'none'}; "
+            f"deleted as redundant {r['shortfall']['deleted_as_redundant']}; warnings {r['shortfall']['warnings']}; gate profile '{r['gate_profile']}'",
             f"- quality: {r['quality']}" + ("   *** DECK IS MUCH SHORTER THAN REQUESTED: the evidence was too thin; see review list and coverage ***"
                                           if r["quality"]["slides_built"] < 0.6 * r["quality"]["slides_requested"] else ""),
             f"- REVIEW BEFORE USE ({len(r['review_before_use'])} items):"] + [f"  - {x}" for x in r["review_before_use"]] + [
