@@ -137,6 +137,7 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
     (run_dir / "review_before_use.md").write_text("# Review before use" + chr(10)*2 + chr(10).join(f"- {x}" for x in items) + chr(10), encoding="utf-8")
     (run_dir / "run_report.json").write_text(json.dumps(report, indent=1), encoding="utf-8")
     (run_dir / "run_report.md").write_text(report_md(report), encoding="utf-8")
+    report["exported_to"] = str(export_outputs(run_dir, deck))
     return report
 
 
@@ -192,6 +193,23 @@ def quality_metrics(spec: DeckSpec, requested: int) -> dict:
     return {"slides_built": len(spec.slides), "slides_requested": requested,
             "specificity": round(sum(_is_concrete(t) for t in stmts) / len(stmts), 2) if stmts else None,
             "distinct_evidence": round(len(set(refs)) / len(refs), 2) if refs else None}
+
+
+def export_outputs(run_dir: Path, deck: Path, label: str | None = None) -> Path:
+    """Copy the finished deck and its companion files into <root>/outputs/<label>/ (a plain folder next to the code, outside runs/)."""
+    import shutil
+
+    import os
+
+    dest = Path(os.environ.get("DECKGEN_OUTPUTS_DIR") or CONFIG.root / "outputs") / (label or run_dir.name)
+    dest.mkdir(parents=True, exist_ok=True)
+    for src in (deck, run_dir / "sources.md", run_dir / "review_before_use.md", run_dir / "run_report.md", run_dir / "qa_report.md"):
+        if src.exists():
+            shutil.copy2(src, dest / (("deck.pptx") if src == deck else src.name))
+    images = run_dir / "final" / "images"
+    if images.exists():
+        shutil.copytree(images, dest / "images", dirs_exist_ok=True)
+    return dest
 
 
 def write_sources(path: Path, used) -> None:

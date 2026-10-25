@@ -215,3 +215,15 @@ def test_outline_repair_drops_unsupported_slides_and_renumbers():
     fixed, dropped = repair_outline(o)
     assert [s.key_message for s in fixed.slides] == ["title", "one", "two", "close"] and [s.n for s in fixed.slides] == [1, 2, 3, 4]
     assert len(dropped) == 2
+
+
+def test_finished_run_is_copied_to_the_outputs_folder(tmp_path, monkeypatch):
+    need_render()
+    monkeypatch.setattr(tools_mod, "CACHE_DIR", tmp_path / "cache")
+    llm = FakeLLM(script())
+    llm.tracer = Tracer(None)
+    rep = run_pipeline(Request("Group B", "fans", 6), llm, ResearchTools(Search(), NoFetch(), Budget(60, 30, 120, 60)), tmp_path / "myrun", auto_approve=True)
+    dest = Path(rep["exported_to"])
+    assert dest == tmp_path / "outputs" / "myrun"
+    assert (dest / "deck.pptx").exists() and (dest / "sources.md").exists() and (dest / "review_before_use.md").exists()
+    assert len(list((dest / "images").glob("slide-*.jpg"))) == 6
