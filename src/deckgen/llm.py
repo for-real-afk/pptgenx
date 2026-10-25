@@ -1,21 +1,41 @@
-"""LLM interface. Stages depend on `LLM`, never on a provider SDK, so the provider is swappable."""
+"""LLM layer. Pipeline stages depend on `LLM` (stage name in, validated Pydantic object out) and never on a provider SDK.
+
+`RoleLLM` maps each stage to a ROLE (extractor / writer / checker / critic), each role to provider + model via config, and adds
+what every provider needs: an on-disk cache keyed by prompt hash, rate-limit awareness (provider headers + local TPM cap),
+per-role budgets, tracing, and parse-validate-retry with the validation error fed back. Correctness never depends on
+provider-side schema enforcement: output is always validated with Pydantic here."""
 from __future__ import annotations
 
 import hashlib
 import json
-import os
 import time
+from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, TypeVar
+from typing import Callable, Protocol, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
 from deckgen.config import CONFIG
+from deckgen.providers import get_adapter
+from deckgen.providers.base import ProviderUnavailable, RateLimited
 
 T = TypeVar("T", bound=BaseModel)
 
+ROLES = ("extractor", "writer", "checker", "critic")
+STAGE_ROLE = {
+    "plan": "writer", "outline": "writer", "spec_slide": "writer", "spec_fallback_labels": "writer", "fixer": "writer",
+    "research_query": "extractor", "research_extract": "extractor",
+    "research_crosscheck": "checker", "faithfulness": "checker", "deck_consistency": "checker",
+    "critic": "critic", "critic_consistency": "critic",
+}
+
 
 class BudgetExceeded(RuntimeError):
+    pass
+
+
+class QuotaExhausted(RuntimeError):
     pass
 
 
@@ -24,13 +44,30 @@ class LLM(Protocol):
                  images: list[Path] | None = None, vision: bool = False) -> T: ...
 
 
+@dataclass
+class RoleSpec:
+    provider: str
+    model: str
+    fallbacks: tuple = ()  # ((provider, model), ...) tried when the primary's daily quota is gone
+    temperature: float = 0.1
+    seed: int | None = 7
+    max_tokens: int = 4096
+
+
+def parse_role(value: str, **kw) -> RoleSpec:
+    """'groq:openai/gpt-oss-120b' or 'groq:a,gemini:b' (first is primary, the rest fallbacks)."""
+    pairs = [tuple(p.strip().split(":", 1)) for p in value.split(",") if p.strip()]
+    return RoleSpec(provider=pairs[0][0], model=pairs[0][1], fallbacks=tuple(pairs[1:]), **kw)
+
+
 class Tracer:
-    """Append-only trace of every LLM call: stage, prompt hash, tokens, latency."""
+    """Append-only trace of every LLM call (role, model, prompt hash, tokens, latency, cache hit, rate-limit wait)."""
 
     def __init__(self, path: Path | None):
         self.path, self.calls, self.tokens_in, self.tokens_out = path, 0, 0, 0
         self.models: set[str] = set()
         self.attempts: dict[str, list[int]] = {}  # stage -> attempt number of each successful call
+        self.roles: dict[str, dict] = {}
 
     def log(self, **rec) -> None:
         self.calls += 1
@@ -38,6 +75,15 @@ class Tracer:
         self.tokens_out += rec.get("tokens_out") or 0
         if rec.get("model"):
             self.models.add(rec["model"])
+        if role := rec.get("role"):
+            r = self.roles.setdefault(role, {"calls": 0, "cache_hits": 0, "tokens_in": 0, "tokens_out": 0, "waited_s": 0.0, "models": set()})
+            r["calls"] += 1
+            r["cache_hits"] += bool(rec.get("cached"))
+            r["tokens_in"] += rec.get("tokens_in") or 0
+            r["tokens_out"] += rec.get("tokens_out") or 0
+            r["waited_s"] += rec.get("waited_s") or 0.0
+            if rec.get("model"):
+                r["models"].add(rec["model"])
         if self.path:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("a", encoding="utf-8") as f:
@@ -47,77 +93,198 @@ class Tracer:
         a = self.attempts.get(stage)
         return None if not a else sum(1 for x in a if x == 1) / len(a)
 
+    def role_summary(self) -> dict:
+        return {k: {**v, "models": sorted(v["models"]), "waited_s": round(v["waited_s"], 1)} for k, v in self.roles.items()}
+
     def summary(self) -> str:
-        return f"{self.calls} LLM calls, {self.tokens_in} tokens in, {self.tokens_out} tokens out"
+        hits = sum(r["cache_hits"] for r in self.roles.values())
+        return f"{self.calls} LLM calls ({hits} from cache), {self.tokens_in} tokens in, {self.tokens_out} tokens out"
 
 
 def parse_json_as(schema: type[T], text: str) -> T:
-    """Strip code fences, parse, validate with Pydantic (never trust provider enforcement alone)."""
+    """Strip code fences, parse, validate with Pydantic."""
     t = text.strip()
     if t.startswith("```"):
         t = t.split("\n", 1)[1].rsplit("```", 1)[0]
     return schema.model_validate_json(t)
 
 
-class GeminiLLM:
-    def __init__(self, tracer: Tracer | None = None, max_calls: int | None = None):
-        from google import genai
+class RateLimiter:
+    """Per-provider: local sliding-window TPM cap plus whatever the provider's headers last said. Waits instead of failing."""
 
-        self.client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-        self.model = CONFIG.model or "gemini-3.5-flash"
-        self.vision_model = CONFIG.vision_model or self.model
-        self.tracer = tracer or Tracer(None)
+    def __init__(self, tpm: int | None = None, clock: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep):
+        self.tpm, self.clock, self.sleep = tpm, clock, sleep
+        self.window: deque = deque()
+        self.remaining: int | None = None
+        self.reset_at = 0.0
+        self.waited = 0.0
+
+    def _wait(self, s: float) -> None:
+        s = max(0.0, min(s, 120.0))
+        if s > 0:
+            self.waited += s
+            self.sleep(s)
+
+    def before(self, est_tokens: int) -> None:
+        for _ in range(50):
+            now = self.clock()
+            while self.window and now - self.window[0][0] >= 60:
+                self.window.popleft()
+            used = sum(t for _, t in self.window)
+            if self.tpm and used + est_tokens > self.tpm and self.window:
+                self._wait(self.window[0][0] + 60 - now + 0.2)
+                continue
+            if self.remaining is not None and est_tokens > self.remaining and self.reset_at > now:
+                self._wait(self.reset_at - now + 0.5)
+                self.remaining = None
+                continue
+            return
+
+    def after(self, tokens: int, remaining: int | None, reset_s: float | None) -> None:
+        now = self.clock()
+        self.window.append((now, tokens))
+        if remaining is not None:
+            self.remaining = remaining
+            self.reset_at = now + (reset_s or 0.0)
+
+    def on_429(self, retry_after: float) -> None:
+        self._wait(retry_after + 0.5)
+
+
+def est_tokens(system: str, prompt: str, images: list | None, max_out: int) -> int:
+    return int((len(system) + len(prompt)) / 3.5) + 1100 * len(images or []) + min(max_out, 1500)
+
+
+class RoleLLM:
+    def __init__(self, roles: dict, tracer: Tracer | None = None, *, cache_dir: Path | None = None,
+                 use_cache: bool | None = None, tpm: dict | None = None, limiter_factory=None,
+                 budgets: dict | None = None, max_calls: int | None = None):
+        self.roles, self.tracer = roles, tracer or Tracer(None)
+        self.cache_dir = cache_dir if cache_dir is not None else CONFIG.runs_dir / "_cache" / "llm"
+        self.use_cache = CONFIG.llm_cache if use_cache is None else use_cache
+        self.budgets = budgets if budgets is not None else CONFIG.role_budgets
         self.max_calls = max_calls if max_calls is not None else CONFIG.max_llm_calls
+        self.used: dict = {r: {"calls": 0, "tokens": 0} for r in ROLES}
+        self._tpm = tpm if tpm is not None else CONFIG.tpm
+        self._limiters: dict = {}
+        self._limiter_factory = limiter_factory
 
-    def _call(self, model, parts, cfg):
-        """Backoff on 429/503, then fall back to the stable model. Returns (response, model used)."""
-        from google.genai import errors
+    def limiter(self, provider: str) -> RateLimiter:
+        if provider not in self._limiters:
+            self._limiters[provider] = (self._limiter_factory(provider) if self._limiter_factory
+                                        else RateLimiter(self._tpm.get(provider)))
+        return self._limiters[provider]
 
-        for m in ((model,) if CONFIG.pin_models else (model, *CONFIG.fallback_models)):
-            for k in range(8 if CONFIG.pin_models else 3):
-                try:
-                    return self.client.models.generate_content(model=m, contents=parts, config=cfg), m
-                except (errors.ServerError, errors.ClientError) as e:
-                    code = getattr(e, "code", 0)
-                    if code == 429 and "PerDay" in str(e):
-                        break  # daily quota for this model is gone: sleeping is pointless, try the next model
-                    if code not in (429, 500, 503):
-                        raise
-                    time.sleep(min(30, 2 ** k * 2))
-        raise RuntimeError("Gemini unavailable after retries and fallback")
+    # -- budget -----------------------------------------------------------------------------------------------------
+    def _check_budget(self, role: str) -> None:
+        b, u = self.budgets.get(role, {}), self.used[role]
+        if b.get("calls") and u["calls"] >= b["calls"]:
+            raise BudgetExceeded(f"role '{role}' call budget {b['calls']} reached")
+        if b.get("tokens") and u["tokens"] >= b["tokens"]:
+            raise BudgetExceeded(f"role '{role}' token budget {b['tokens']} reached")
+        if self.max_calls and sum(x["calls"] for x in self.used.values()) >= self.max_calls:
+            raise BudgetExceeded(f"overall LLM call cap {self.max_calls} reached")
 
-    def generate(self, *, stage, system, prompt, schema, images=None, vision=False):
-        from google.genai import types
+    def budget_report(self) -> dict:
+        return {r: {**self.used[r], "limit": self.budgets.get(r, {})} for r in ROLES if self.used[r]["calls"]}
 
-        if self.tracer.calls >= self.max_calls:
-            raise BudgetExceeded(f"LLM call cap {self.max_calls} reached")
-        full = f"{prompt}\n\nRespond with JSON only, matching this JSON Schema:\n{json.dumps(schema.model_json_schema())}"
-        parts: list = [full]
-        for img in images or []:
-            parts.append(types.Part.from_bytes(data=Path(img).read_bytes(), mime_type="image/jpeg"))
-        cfg = types.GenerateContentConfig(system_instruction=system, response_mime_type="application/json", temperature=0.2)
-        model = self.vision_model if (vision or images) else self.model
-        t0, last_err = time.time(), None
-        for attempt in (1, 2):  # one repair attempt on unparseable output
-            r, model = self._call(model, parts, cfg)
-            um = r.usage_metadata
-            self.tracer.log(stage=stage, model=model, prompt_hash=hashlib.sha256(full.encode()).hexdigest()[:12],
-                            tokens_in=getattr(um, "prompt_token_count", 0), tokens_out=getattr(um, "candidates_token_count", 0),
-                            latency_s=round(time.time() - t0, 2), attempt=attempt)
+    # -- cache ------------------------------------------------------------------------------------------------------
+    def _key(self, role, spec, provider, model, system, prompt, schema, images) -> str:
+        img = [hashlib.sha256(Path(i).read_bytes()).hexdigest()[:16] for i in images or []]
+        blob = json.dumps([provider, model, role, spec.temperature, spec.seed, system, prompt, schema.__name__,
+                           json.dumps(schema.model_json_schema(), sort_keys=True), img], sort_keys=True)
+        return hashlib.sha256(blob.encode()).hexdigest()
+
+    def _cache_get(self, key: str):
+        p = self.cache_dir / f"{key}.json"
+        if self.use_cache and p.exists():
             try:
-                out = parse_json_as(schema, r.text or "")
+                return json.loads(p.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return None
+        return None
+
+    def _cache_put(self, key: str, rec: dict) -> None:
+        if self.use_cache:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            (self.cache_dir / f"{key}.json").write_text(json.dumps(rec), encoding="utf-8")
+
+    # -- main -------------------------------------------------------------------------------------------------------
+    def generate(self, *, stage, system, prompt, schema, images=None, vision=False):
+        role = STAGE_ROLE.get(stage) or ("critic" if (images or vision) else "writer")
+        spec = self.roles[role]
+        full = f"{prompt}\n\nRespond with JSON only, matching this JSON Schema:\n{json.dumps(schema.model_json_schema())}"
+        candidates = [(spec.provider, spec.model)] + ([] if CONFIG.pin_models else list(spec.fallbacks))
+        last = None
+        for provider, model in candidates:
+            key = self._key(role, spec, provider, model, system, full, schema, images)
+            hit = self._cache_get(key)
+            if hit is not None:
+                try:
+                    out = parse_json_as(schema, hit["text"])
+                    self.tracer.log(stage=stage, role=role, provider=provider, model=model, cached=True, tokens_in=0, tokens_out=0,
+                                    prompt_hash=key[:12], attempt=hit.get("attempt", 1))
+                    self.tracer.attempts.setdefault(stage, []).append(hit.get("attempt", 1))
+                    return out
+                except (ValidationError, ValueError):
+                    pass  # stale or bad cache entry: recompute
+            self._check_budget(role)
+            try:
+                return self._call(stage, role, spec, provider, model, system, full, schema, images, key)
+            except QuotaExhausted as e:
+                last = e
+        raise QuotaExhausted(f"{stage}: daily quota exhausted for {candidates}: {last}")
+
+    def _call(self, stage, role, spec, provider, model, system, full, schema, images, key):
+        adapter, lim = get_adapter(provider), self.limiter(provider)
+        schema_json = json.dumps(schema.model_json_schema())
+        text_prompt, last_err, t0 = full, None, time.time()
+        for attempt in range(1, CONFIG.parse_attempts + 1):
+            waited0, raw = lim.waited, None
+            for net in range(1, CONFIG.net_attempts + 1):
+                lim.before(est_tokens(system, text_prompt, images, spec.max_tokens))
+                try:
+                    raw = adapter.complete(model=model, system=system, prompt=text_prompt, images=images, temperature=spec.temperature,
+                                           seed=spec.seed, max_tokens=spec.max_tokens, schema_json=schema_json)
+                    break
+                except RateLimited as e:
+                    if e.daily:
+                        raise QuotaExhausted(str(e)) from e
+                    lim.on_429(e.retry_after)
+                except ProviderUnavailable:
+                    lim._wait(min(30, 2 ** net))
+            if raw is None:
+                raise RuntimeError(f"{stage}: provider '{provider}' unavailable after {CONFIG.net_attempts} tries")
+            lim.after(raw.tokens_in + raw.tokens_out, raw.remaining_tokens, raw.reset_seconds)
+            self.used[role]["calls"] += 1
+            self.used[role]["tokens"] += raw.tokens_in + raw.tokens_out
+            self.tracer.log(stage=stage, role=role, provider=provider, model=raw.model or model, cached=False, prompt_hash=key[:12],
+                            tokens_in=raw.tokens_in, tokens_out=raw.tokens_out, latency_s=round(time.time() - t0, 2),
+                            attempt=attempt, waited_s=round(lim.waited - waited0, 2))
+            try:
+                out = parse_json_as(schema, raw.text or "")
                 self.tracer.attempts.setdefault(stage, []).append(attempt)
+                self._cache_put(key, {"text": raw.text, "attempt": attempt})
                 return out
             except (ValidationError, ValueError) as e:
                 last_err = e
-                parts = [full, f"Your previous output was invalid: {str(e)[:500]}. Return corrected JSON only."]
-        raise ValueError(f"{stage}: unparseable after retry: {str(last_err)[:300]}")
+                text_prompt = f"{full}\n\nYour previous output was invalid: {str(e)[:500]}\nReturn corrected JSON only."
+        raise ValueError(f"{stage}: unparseable after {CONFIG.parse_attempts} attempts: {str(last_err)[:300]}")
 
 
-def make_llm(tracer: Tracer | None = None) -> LLM:
-    if CONFIG.llm_provider == "gemini":
-        return GeminiLLM(tracer)
-    raise NotImplementedError(f"provider {CONFIG.llm_provider}")
+class GeminiLLM(RoleLLM):
+    """Back-compat: every role on Gemini (used by the live tests)."""
+
+    def __init__(self, tracer: Tracer | None = None, max_calls: int | None = None):
+        super().__init__(default_roles("gemini"), tracer, max_calls=max_calls)
+
+
+def default_roles(provider: str | None = None) -> dict:
+    return CONFIG.build_roles(provider)
+
+
+def make_llm(tracer: Tracer | None = None) -> RoleLLM:
+    return RoleLLM(default_roles(), tracer)
 
 
 class FakeLLM:

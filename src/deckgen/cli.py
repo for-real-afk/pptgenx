@@ -20,6 +20,31 @@ def _check(name: str, ok: bool, detail: str = "") -> bool:
     return ok
 
 
+def _check_models() -> list[bool]:
+    """Fetch each configured provider's live model list and warn when a role points at a model that is not there."""
+    from deckgen.providers import get_adapter
+
+    out, seen = [], {}
+    for role, spec in CONFIG.build_roles().items():
+        for provider, model in [(spec.provider, spec.model), *spec.fallbacks]:
+            try:
+                if provider not in seen:
+                    seen[provider] = set(get_adapter(provider).list_models())
+                ok = model in seen[provider]
+                out.append(_check(f"role {role}: {provider}:{model}", ok, "" if ok else "model not in the provider's model list"))
+            except Exception as e:  # noqa: BLE001 - missing key or network: report, do not crash doctor
+                out.append(_check(f"role {role}: {provider}:{model}", False, f"cannot list models ({type(e).__name__}: {str(e)[:80]})"))
+    return out
+
+
+@app.command()
+def checks(profile: str = typer.Option(None, help="strict | demoted")) -> None:
+    """Print the check registry: category and severity of every check."""
+    from deckgen.registry import table
+
+    typer.echo(table(profile))
+
+
 @app.command()
 def doctor() -> None:
     """Check render toolchain, Node renderer deps, fonts, writable dirs."""
@@ -37,6 +62,7 @@ def doctor() -> None:
             results.append(_check(f"font {need}", need.lower() in fonts.lower()))
     except soffice.RenderError as e:
         results.append(_check("render backend", False, str(e)))
+    results += _check_models()
     for d in (Path(tempfile.gettempdir()), CONFIG.runs_dir):
         d.mkdir(parents=True, exist_ok=True)
         probe = d / ".deckgen_probe"
@@ -96,6 +122,7 @@ def generate(
     from_stage: str = typer.Option(None, help="force re-run from: plan|research|outline|spec|qa"),
     auto_approve: bool = typer.Option(False, help="skip the outline approval prompt"),
     qa_loop: bool = typer.Option(True, "--qa/--no-qa"),
+    no_cache: bool = typer.Option(False, "--no-cache", help="ignore and do not write the LLM response cache"),
 ) -> None:
     """Topic -> researched, sourced, QA'd .pptx under runs/<run_id>/."""
     import time
@@ -106,7 +133,13 @@ def generate(
     rid = run_id or f"{slug(topic)}-{time.strftime('%m%d-%H%M')}"
     run_dir = CONFIG.runs_dir / rid
     run_dir.mkdir(parents=True, exist_ok=True)
+    if no_cache:
+        import os
+
+        os.environ["DECKGEN_NO_CACHE"] = "1"  # read by Config at import; also pass use_cache explicitly below
     llm = make_llm(Tracer(run_dir / "trace.jsonl"))
+    if no_cache:
+        llm.use_cache = False
     report = run_pipeline(Request(topic, audience, slides, brand), llm, make_tools(), run_dir,
                           auto_approve=auto_approve, from_stage=from_stage, do_qa=qa_loop)
     typer.echo(report_md(report))

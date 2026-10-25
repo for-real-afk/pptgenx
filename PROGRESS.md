@@ -56,3 +56,13 @@ Finding: the rule stack is stricter than a flash-lite model can satisfy on thin 
 run-to-run variance is large (v4 vs v5 on IDENTICAL research gave 8 vs 6 slides). Decks now say loudly when they are short.
 Open decisions: stronger model for spec/fact-check; which gates become warnings in the review list instead of hard fails (10-word copy rule,
 heading-name check, two-source numbers); fetch full pages for research (6000-char cap, ~8 pages per run).
+
+## Round 2, step 1: provider layer
+- `deckgen/providers/` (base, gemini, groq, anthropic, fake): one file per provider, loaded by name; Groq-specific settings (reasoning flags,
+  best-effort json_object, header parsing) live only in groq.py. Anthropic adapter is plain HTTP, untested live (no key).
+- `RoleLLM`: stages -> roles (extractor/writer/checker/critic) -> provider:model by `DECKGEN_ROLE_<ROLE>`; checker can sit on another family.
+  On-disk cache by prompt hash (`--no-cache`), rate limiter (provider headers + local TPM cap, waits not fails), per-role call/token
+  budgets, Pydantic validate-and-retry with the error as feedback, model/role/cached/waited per call in trace.jsonl and per role in run_report.md.
+- `registry.py` + `deckgen checks`: every check tagged correctness | model_compensation with strict/demoted severity. Thresholds moved to config.
+- `deckgen doctor` lists each configured model against the provider's live model list.
+- No GROQ_API_KEY in this environment: Groq adapter is tested with a stubbed HTTP layer only. Live Groq runs wait for the key.
