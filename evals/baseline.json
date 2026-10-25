@@ -1,0 +1,10 @@
+{
+  "_comment": "Round-1 results (before the content-reliability work). Built = slides in the final deck. All had 0 blocking issues and 0 unsourced slides by the checks of that time, but a manual read of WRC found filler, overclaims, redundancy and one wrong fact, so 'built' there overstates quality. Gemini gemini-3.5-flash-lite for every role.",
+  "rows": [
+    {"topic": "The golden era of WRC Group B (1980s)", "requested": 14, "built": [14, 5, 8, 6], "note": "14 = first deck (flawed content); 5, 8, 6 = successive stricter-check runs on the same topic (8 and 6 on IDENTICAL findings)"},
+    {"topic": "How the Apollo 11 mission reached the Moon", "requested": 12, "built": [12], "note": "single run, before the claim checks"},
+    {"topic": "How mRNA vaccines work and how they were developed", "requested": 12, "built": [12], "note": "single run, before the claim checks"},
+    {"topic": "The printing press and its effect on European society", "requested": 10, "built": [0, 10], "note": "first run failed on a 2-character title overflow; second run completed"},
+    {"topic": "Remote work trade-offs for software engineering teams", "requested": 10, "built": [10], "note": "single run, before the claim checks"}
+  ]
+}

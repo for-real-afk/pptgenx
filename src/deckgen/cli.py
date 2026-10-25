@@ -147,11 +147,12 @@ def generate(
 
 
 @app.command("eval")
-def eval_(golden: Path = typer.Option(Path("evals/golden_topics.json")), only: str = typer.Option(None, help="substring of topic")) -> None:
+def eval_(golden: Path = typer.Option(Path("evals/golden_topics.json")), only: str = typer.Option(None, help="substring of topic"),
+          runs: int = typer.Option(3, help="runs per topic (run 1 does the research)")) -> None:
     """Run the golden topics and print the per-run metrics table."""
     from evals.run_evals import run_all
 
-    raise typer.Exit(run_all(golden, only))
+    raise typer.Exit(run_all(golden, only, runs))
 
 
 @app.command("experiment")
