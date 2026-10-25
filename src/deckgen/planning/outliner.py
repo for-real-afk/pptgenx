@@ -81,18 +81,23 @@ def repair_outline(o: Outline) -> tuple[Outline, list[str]]:
 
 
 def outline(llm: LLM, brief: Brief, findings: Findings, retries: int = 3) -> Outline:
+    q_index = {q: i for i, q in enumerate(brief.research_questions, 1)}
+    usable_n = sum(not f.excluded for f in findings.findings)
     catalog = "\n".join(
-        f"{f.id} [{f.confidence}, {f.corroborated_by} site(s){', SINGLE-SOURCE STRONG CLAIM' if f.needs_review else ''}] {f.claim}"
+        f"{f.id} [Q{q_index.get(f.question, 0)}, {f.confidence}, {f.corroborated_by} site(s){', SINGLE-SOURCE STRONG CLAIM' if f.needs_review else ''}] {f.claim}"
         for f in findings.findings if not f.excluded)
     arcs = "\n".join(f"- {k}: {v}" for k, v in ARCS.items())
     ids = {f.id for f in findings.findings if not f.excluded}
     want = brief.slide_count - 1
+    target = min(want, max(MIN_SLIDES, usable_n // 3))  # each content slide needs 2-4 findings of its own: what the pool can carry
     base = (
         f"Topic: {brief.topic}\nAudience: {brief.audience}\nObjective: {brief.objective}\n\n"
         f"ARCS:\n{arcs}\n\nFINDINGS (the only facts you may build on):\n{catalog}\n\n"
         f"Choose the best arc and write a slide-by-slide outline of AT MOST {want} slides (a Sources slide is appended "
-        f"automatically). {want} is a maximum, not a target: build only as many slides as the evidence supports, at least "
-        f"{MIN_SLIDES}; padding thin evidence into filler slides is worse than a shorter deck. Slide 1 has layout_hint TITLE; the last slide has layout_hint CLOSING (conclusion and next steps). "
+        f"automatically). {want} is a maximum; the pool of {usable_n} usable findings can carry about {target}: write {target} slides unless "
+        f"distinct findings run out earlier, never fewer than {MIN_SLIDES}. Filler is worse than a shorter deck, but so is leaving good "
+        "findings unused. Cover every research question (Q1, Q2, ...) that has usable findings and give no single question more than a "
+        "third of the slides (one slide per distinct point; never retell the same event on several slides). Slide 1 has layout_hint TITLE; the last slide has layout_hint CLOSING (conclusion and next steps). "
         "Other slides use layout_hint TITLE_ONLY (default; cards, stats, timeline, comparison or icon rows), CHART_COMMENTARY or TABLE; no section dividers. Each slide: n, section "
         "(contiguous groups, 3-5 sections total), purpose, key_message (one sentence stating the point), finding_ids "
         "(2-4 ids that support it; use the ids exactly). Prefer findings from at least two different websites for any slide with numbers or superlatives. Cover the findings broadly; prefer high-confidence ones; use a "

@@ -40,6 +40,21 @@ class DataHint(BaseModel):
         return head + ": " + "; ".join(f"{r.label} = {r.value} [{r.finding_id}]" for r in self.rows[:8]) + ". Use only these values; cite their ids."
 
 
+def _words(t: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z]+", t.lower()) if len(w) > 3}
+
+
+def _template_cluster(rows: list[Row]) -> list[Row]:
+    """Largest set of rows that say the same KIND of thing (drivers' titles with drivers' titles, not mixed with manufacturers' wins)."""
+    best: list[Row] = []
+    for seed in rows:
+        sw = _words(seed.value)
+        group = [r for r in rows if sw and len(sw & _words(r.value)) / len(sw | _words(r.value)) >= 0.3]
+        if len(group) > len(best):
+            best = group
+    return best
+
+
 def detect(findings: list[Finding]) -> list[DataHint]:
     usable = [f for f in findings if not f.excluded]
     hints: list[DataHint] = []
@@ -57,8 +72,9 @@ def detect(findings: list[Finding]) -> list[DataHint]:
         if len(years) == 1:
             by_q[f.question].setdefault(years[0], Row(label=years[0], value=f.claim[:70], finding_id=f.id))
     for rows in by_q.values():
-        if len(rows) >= 4:
-            hints.append(DataHint(kind="table", rows=[rows[y] for y in sorted(rows)][:6]))
+        cluster = _template_cluster(list(rows.values()))
+        if len(cluster) >= 4:
+            hints.append(DataHint(kind="table", rows=sorted(cluster, key=lambda r: r.label)[:6]))
     return hints
 
 

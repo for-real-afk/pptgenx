@@ -172,3 +172,36 @@ def test_chart_written_from_a_hint_is_grounded_and_reaches_the_writer_prompt(tmp
     s = build_slide(llm, Brief(topic="t", audience="a", slide_count=6), o, outline, fs, Path("brand/default_v1"), [], False)
     assert s.chart and s.chart.series[0].values == [493, 550, 450]
     assert "DATA HINT: native chart candidate" in llm.calls[0]["prompt"] and "493" in llm.calls[0]["prompt"]
+
+
+# ---- fixes from the first live run -------------------------------------------------------------------------------------------
+def test_one_page_listing_several_years_does_not_contradict_itself():
+    same_page = "Audi won in 1982 Audi won in 1984 Peugeot won in 1985. " * 6
+    findings = [f(1, "In 1982 Audi won the manufacturers title", "https://rally.example.com/titles", "other", page=same_page),
+                f(2, "In 1984 Audi won the manufacturers title", "https://rally.example.com/titles", "other", page=same_page)]
+    out, conflicts = weigh(llm_for(("f01", "f02")), findings, TierTable())
+    assert not conflicts and not any(x.excluded for x in out)         # both true; same origin, so not a conflict
+
+
+def test_table_hint_keeps_rows_of_one_template_only():
+    from deckgen.research.shapes import detect
+
+    def g(i, claim):
+        return f(i, claim, f"https://s{i}.example.org/p", page=f"unique page {i} " * 30).model_copy(update={"question": "q"})
+
+    rows = [g(1, "Walter Rohrl won the drivers championship in 1982"), g(2, "Hannu Mikkola won the drivers championship in 1983"),
+            g(3, "Stig Blomqvist won the drivers championship in 1984"), g(4, "Timo Salonen won the drivers championship in 1985"),
+            g(5, "Lancia won the manufacturers cup of constructors in 1983"), g(6, "Audi finished the manufacturers cup of constructors in 1982")]
+    table = [h for h in detect(rows) if h.kind == "table"][0]
+    assert [r.label for r in table.rows] == ["1982", "1983", "1984", "1985"] and all(r.finding_id in {"f01", "f02", "f03", "f04"} for r in table.rows)
+
+
+def test_review_list_groups_warnings_by_check():
+    from deckgen.pipeline import review_items
+    from deckgen.schemas import DeckSpec, SlideSpec
+
+    spec = DeckSpec(title="t", brand="default_v1", slides=[SlideSpec(id="s01", section="a", layout="TITLE", title="T")])
+    notes = {"warnings": [{"outline_slide": n, "check": "layout_variety", "category": "model_compensation", "message": "same layout used 3 times"} for n in (7, 8, 9)]
+             + [{"outline_slide": 5, "check": "copy_short", "category": "model_compensation", "message": "repeats 8+ words"}]}
+    items = review_items(spec, {}, notes)
+    assert len(items) == 2 and "x3" in items[0] and "[7, 8, 9]" in items[0]

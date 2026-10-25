@@ -161,7 +161,10 @@ def review_items(spec: DeckSpec, by_id: dict, notes: dict, findings_obj=None) ->
         if "built directly from the research findings" in s.speaker_notes.lower():
             out.append(f"slide {i}: fallback slide built from raw findings after generation failed; wording is plain by design")
     out += [f"slide dropped [{u.get('category', 'evidence')}] ({u['message'][:70]}): {u['reason'][:140]}" for u in notes.get("dropped_unsupported_slides", [])]
-    out += [f"warning [{w['check']}] on outline slide {w['outline_slide']}: {w['message']}" for w in notes.get("warnings", [])]
+    grouped: dict[str, list] = {}
+    for w in notes.get("warnings", []):
+        grouped.setdefault(w["check"], []).append(w)
+    out += [f"warning [{c}] x{len(ws)} (outline slides {sorted({w['outline_slide'] for w in ws})}): {ws[0]['message'][:120]}" for c, ws in grouped.items()]
     out += [f"unresolved cross-slide problem on slides {p['slides']}: {p['description']}" for p in notes.get("unresolved", [])]
     return out
 

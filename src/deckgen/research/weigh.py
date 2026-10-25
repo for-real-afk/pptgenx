@@ -161,6 +161,8 @@ def resolve(findings: list[Finding], confirmed: set[frozenset]) -> tuple[list[Fi
     links: dict[str, set[str]] = {}
     for pair in sorted(confirmed, key=lambda p: sorted(p)):
         a, b = (by_id[x] for x in sorted(pair))
+        if a.origin_id and a.origin_id == b.origin_id:
+            continue  # one origin (for example one page listing several years) cannot contradict itself: extraction ambiguity, not disagreement
         links.setdefault(a.id, set()).add(b.id)
         links.setdefault(b.id, set()).add(a.id)
         wa, wb = weight(a), weight(b)
