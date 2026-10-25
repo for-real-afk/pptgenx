@@ -10,8 +10,8 @@ const LAYOUTS = [
     name: "TITLE", dark: true, motif: true,
     use_when: "Opening slide: deck title and one-line subtitle.",
     placeholders: [
-      { name: "title", type: "title", x: MARGIN, y: 2.3, w: 7.6, h: 1.8, fontSize: 44, bold: true, color: "bg1", valign: "bottom" },
-      { name: "subtitle", type: "body", x: MARGIN, y: 4.3, w: 7.6, h: 1.4, fontSize: 20, color: "bg2", valign: "top" },
+      { name: "title", type: "title", x: MARGIN, y: 1.7, w: 7.6, h: 2.5, fontSize: 40, bold: true, color: "bg1", valign: "bottom" },
+      { name: "subtitle", type: "body", x: MARGIN, y: 4.4, w: 7.6, h: 1.4, fontSize: 20, color: "bg2", valign: "top" },
     ],
   },
   {

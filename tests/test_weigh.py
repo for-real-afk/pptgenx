@@ -205,3 +205,36 @@ def test_review_list_groups_warnings_by_check():
              + [{"outline_slide": 5, "check": "copy_short", "category": "model_compensation", "message": "repeats 8+ words"}]}
     items = review_items(spec, {}, notes)
     assert len(items) == 2 and "x3" in items[0] and "[7, 8, 9]" in items[0]
+
+
+# ---- fixes from the niche-topic live run ------------------------------------------------------------------------------------
+def test_checker_flagging_unrelated_claims_as_contradictions_is_ignored():
+    findings = [f(1, "The vessel was discovered in 1936 near the village of Khujut Rabu", "https://a.example.org/x", "other", page="alpha page " * 40),
+                f(2, "Replicas produce between half a volt and two volts with an acid electrolyte", "https://b.example.net/y", "other", page="beta page " * 40)]
+    out, conflicts = weigh(llm_for(("f01", "f02")), findings, TierTable())
+    assert not conflicts and not any(x.excluded for x in out)       # the checker cried wolf about two different subjects
+
+
+def test_future_claims_need_support_in_the_findings():
+    from deckgen.spec.claims import claim_violations
+    from test_claims import FINDINGS, bad
+
+    s = bad(title="Future discoveries will clarify the rules")
+    checks = [x.check for x in claim_violations(s, FINDINGS)]
+    assert checks.count("overclaim_word") >= 2                       # 'future' and 'will' are not in the cited findings
+
+
+def test_long_title_slide_fits_its_box(tmp_path):
+    import subprocess
+
+    from deckgen.qa import checks
+    from deckgen.schemas import DeckSpec, SlideSpec
+
+    spec = DeckSpec(title="t", brand="default_v1", slides=[SlideSpec(id="s01", section="a", layout="TITLE", title="The Baghdad Battery: Evidence and Interpretations",
+                                                                       placeholders={"subtitle": "Prepared for a curious general audience"})])
+    p = tmp_path / "s.json"
+    p.write_text(spec.model_dump_json(exclude_none=True))
+    out = tmp_path / "t.pptx"
+    r = subprocess.run(["node", "renderer/build_deck.js", str(p), "brand/default_v1", str(out)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert [i for i in checks.check(out) if i.type == "overflow"] == []

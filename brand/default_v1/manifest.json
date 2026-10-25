@@ -8,8 +8,8 @@
         {
           "name": "title",
           "type": "title",
-          "font_size": 44,
-          "max_chars": 48
+          "font_size": 40,
+          "max_chars": 81
         },
         {
           "name": "subtitle",

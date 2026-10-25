@@ -117,7 +117,7 @@ def _caption(refs: list[str], findings: dict[str, Finding]) -> str | None:
 
 def title_slide(brief: Brief, outline: Outline, o: OutlineSlide) -> SlideSpec:
     """Title and subtitle come from the request: the topic as asked, and the brief's objective (or the audience line)."""
-    limit = 48  # TITLE layout: 44 pt in a 7.6 in box, two lines
+    limit = 60  # TITLE layout: 40 pt in a 7.6 in box, three lines
     title = brief.topic if len(brief.topic) <= limit else outline.deck_title
     sub = brief.objective.strip() if 0 < len(brief.objective.strip()) <= 180 else f"Prepared for {brief.audience}"
     return SlideSpec(id=f"s{o.n:02d}", section=o.section, layout="TITLE", title=title, placeholders={"subtitle": sub},

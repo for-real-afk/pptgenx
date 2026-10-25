@@ -15,7 +15,7 @@ from deckgen.spec.violations import Violation, v
 
 OVERCLAIMS = ["first", "only", "all", "every", "always", "never", "none", "exponential", "exponentially", "unprecedented",
               "unmatched", "unrivaled", "unrivalled", "revolutionary", "dramatic", "dramatically", "greatest", "best",
-              "entire", "completely", "instantly", "forever", "undisputed", "unparalleled"]
+              "entire", "completely", "instantly", "forever", "undisputed", "unparalleled", "will", "future", "inevitably"]
 OVERCLAIM_RE = re.compile(r"(?<![-\w])(" + "|".join(OVERCLAIMS) + r")(?![-\w])", re.I)
 NUM_RE = re.compile(r"\d[\d,]*\.?\d*%?")
 NAME_RE = re.compile(r"\b[A-Z][a-zA-Z]{2,}(?:\s+[A-Z][a-zA-Z]{2,})+\b")

@@ -132,16 +132,23 @@ def candidate_pairs(findings: list[Finding], limit: int = 60) -> list[tuple[int,
     return [(i, j) for _, i, j in sorted(cands, reverse=True)[:limit]]
 
 
+def _same_subject(a: Finding, b: Finding) -> bool:
+    """A contradiction needs two claims about the SAME thing: they must share a good part of their content words."""
+    ta, tb = _tokset(a.claim), _tokset(b.claim)
+    return bool(ta and tb) and len(ta & tb) / len(ta | tb) >= 0.35
+
+
 def judge_pairs(llm: LLM, findings: list[Finding], pairs: list[tuple[int, int]]) -> set[frozenset]:
     out: set[frozenset] = set()
     known = {f.id for f in findings}
+    by_id = {f.id: f for f in findings}
     if pairs:
         listing = "\n".join(f"P{n}: [{findings[i].id}] {findings[i].claim}  VS  [{findings[j].id}] {findings[j].claim}" for n, (i, j) in enumerate(pairs, 1))
         v = llm.generate(stage="research_conflict_pairs", system="You judge whether two claims contradict. Output JSON only.", schema=PairVerdicts,
                          prompt="For each pair, decide whether the two claims state the SAME fact with INCOMPATIBLE values (for example two different "
                                 "years for one event). Claims about different events, people or things are NOT contradictions even if worded alike. "
                                 f"Return only the contradicting pairs as ids a and b.\n\n{listing}")
-        out |= {frozenset((p.a, p.b)) for p in v.contradictions if p.a in known and p.b in known and p.a != p.b}
+        out |= {frozenset((p.a, p.b)) for p in v.contradictions if p.a in known and p.b in known and p.a != p.b and _same_subject(by_id[p.a], by_id[p.b])}
     if len(findings) >= 2:  # the general pass catches contradictions without numbers
         listing = "\n".join(f"{f.id}: {f.claim}" for f in findings[:120])
         rep = llm.generate(stage="research_crosscheck", system="You compare factual claims. Output JSON only.", schema=ConflictReport,
@@ -149,7 +156,7 @@ def judge_pairs(llm: LLM, findings: list[Finding], pairs: list[tuple[int, int]])
                                   f"with contradictions give its id and the ids it conflicts with.\n\n{listing}")
         for link in rep.links:
             for o in link.conflicts_with:
-                if link.id in known and o in known and o != link.id:
+                if link.id in known and o in known and o != link.id and _same_subject(by_id[link.id], by_id[o]):
                     out.add(frozenset((link.id, o)))
     return out
 
