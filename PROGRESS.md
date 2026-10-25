@@ -113,3 +113,11 @@ heading-name check, two-source numbers); fetch full pages for research (6000-cha
   specificity, distinct evidence, redundant pairs, fallbacks, warnings, review length, first-attempt pass, calls, tokens, failed runs).
 - Gate profile switches per variant at runtime (`registry.use_profile`). Tested offline with scripted fakes. NOT run live: no GROQ_API_KEY here.
 - Cost in currency is not computed (no price table); tokens and calls are reported.
+
+## Round 2, step 7: evals (live, Gemini only: no Groq key, no Anthropic key)
+- `deckgen eval --runs 3`: run 1 does the research, runs 2-3 reuse its findings and redo outline/spec/QA with the LLM cache off; go/no-go evaluator
+  (>=80% of slides on every run, zero blocking, zero unsourced, spread <= 1, <= 1 fallback per deck, review list <= 15) is unit-tested; manual read stays PENDING.
+- Live on gemini-3.5-flash-lite (+ flash-lite-latest as checker): WRC 12/14 slides x3 runs, GO; Baghdad Battery (niche, contested) 7/8 x3, GO after three fixes
+  that the first live runs exposed: same-origin pairs are not conflicts, conflicts need a shared subject (32 -> 3), title slide box too small, closing body too narrow,
+  future-tense claims need support. Five other golden topics NOT run.
+- Spread is 0 on both topics but the seed is fixed at 7 and temperature is 0.2: that shows determinism of this setup, not robustness. Different seeds not tried.

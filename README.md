@@ -72,3 +72,16 @@ round is kept only if the blocking score improves; otherwise the loop reverts to
 - Number grounding checks that chart, stat and year values appear in the cited findings; it cannot check what they mean.
 - No images (`image_request`) and no org-template mode yet (Phase 2). The corpus module is stubbed off (`corpus.enabled=false`).
 - Slide splitting and layout switching as automatic fixes are not implemented; fixes are trim/delete only.
+
+
+## Providers, roles, gates (round 2)
+
+- **Providers**: one file per provider in `src/deckgen/providers/` (gemini, groq, anthropic, fake). Roles map to `provider:model`:
+  `DECKGEN_ROLE_EXTRACTOR|WRITER|CHECKER|CRITIC="groq:openai/gpt-oss-120b"` (comma-separate fallbacks). The checker should be a different model family than the writer.
+  LLM responses are cached by prompt hash in `runs/_cache/llm` (`--no-cache`); rate limits are honoured by waiting; per-role call/token budgets are reported.
+- **Gates**: `deckgen checks` lists every check with its category (correctness | model_compensation) and severity under the `strict` and `demoted` profiles
+  (`DECKGEN_GATES`, default demoted). Hard gates drive repair; warnings go to `review_before_use.md` and never drop a slide. See `docs/CHECKS.md`.
+- **Research**: full pages, relevant passages only, rounds until the raw pool reaches `DECKGEN_TARGET_FINDINGS`; source tiers (`config/source_tiers.json`, per-topic
+  overrides in `config/tier_overrides/`), independent origins, conflict resolution by weight. **Writing**: whole weighted pool, write once, fix with small diffs.
+- **Experiments**: `deckgen experiment --base-run <id> --runs 3`; **evals**: `deckgen eval --runs 3` (7 golden topics, go/no-go in `runs/eval2/summary.md`).
+- When the Anthropic key arrives: `docs/RETEST_ANTHROPIC.md`.

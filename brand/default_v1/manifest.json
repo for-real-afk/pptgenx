@@ -109,8 +109,8 @@
         {
           "name": "body",
           "type": "body",
-          "font_size": 22,
-          "max_chars": 539
+          "font_size": 20,
+          "max_chars": 708
         }
       ]
     },
