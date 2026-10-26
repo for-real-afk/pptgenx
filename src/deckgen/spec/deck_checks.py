@@ -29,7 +29,7 @@ class Problem(BaseModel):
     model_config = ConfigDict(extra="forbid")
     quotes: list[Quote] = Field(default_factory=list)
     kind: Literal["contradiction", "redundancy", "unclear_reference", "title_mismatch"]
-    slides: list[int] = Field(min_length=1, max_length=4, description="1-based slide numbers involved")
+    slides: list[int] = Field(min_length=1, max_length=14, description="1-based slide numbers involved")
     description: str
 
 
@@ -109,8 +109,12 @@ def consistency(llm: LLM, spec: DeckSpec, findings: dict[str, Finding]) -> list[
         "if there are none. For each problem give the slide numbers, one sentence, and `quotes`: for every slide involved, the exact words copied from "
         "that slide that show the problem. A problem without exact quotes, or one you conclude is fine, must not be listed."
     )
-    found = llm.generate(stage="deck_consistency", system="You review a whole deck for internal consistency. Output JSON only.",
-                         prompt=prompt, schema=ProblemList).problems
+    try:
+        found = llm.generate(stage="deck_consistency", system="You review a whole deck for internal consistency. Output JSON only.",
+                             prompt=prompt, schema=ProblemList).problems
+    except ValueError as e:  # an unparseable review must not lose the deck: logged, the deterministic checks still run
+        print(f"deck consistency check unparseable ({str(e)[:100]}); skipped")
+        return []
     return [p for p in found if keep(p, slide_texts(spec))]
 
 

@@ -128,7 +128,7 @@ def build_sheet(llm: LLM, findings: list[Finding]) -> Sheet:
         prompt=f"FINDINGS:{NL}{listing}{NL}{NL}List every real-world fact that different findings state DIFFERENTLY: a different date, number, name, cause, sequence "
                f"or who-did-what (for example two power figures for one car, or two accounts of when someone withdrew). One group per (subject, attribute): give a short "
                f"canonical subject and attribute (the same words every time the same fact comes up) and, for each finding involved, the value it states. Skip facts on "
-               f"which all findings agree and skip findings about different things. At most {MAX_GROUPS} groups.")
+               f"which all findings agree and skip findings about different things. At most {MAX_GROUPS} groups.", max_tokens=8000)
     entries = [e for g in merge_groups(groups.groups[:MAX_GROUPS]) if (e := decide(g, by_id))]
     single = [f"{f.id} ({domain(f.source_url)})" for f in usable if f.needs_review][:MAX_SINGLE]
     return Sheet(entries=entries, single_source=single)
