@@ -158,3 +158,8 @@ Live runs used Anthropic (Haiku 5.5 for reading, Sonnet 5.5 for writing) under a
 - What went wrong: about 10 turns were spent probing the helper API (printing helper source onto slides, 4 builds failing with `undefined.length`); 19 builds and 19 whole-script rewrites; the run hit the tool limit before review notes and the look-at-every-slide pass finished.
 - Bug found and fixed: salvage picked a one-slide debug probe as "best build" (it had fewer issues than the real deck). Ranking is now: fewest hard issues, then most slides, then fewest blocking issues. The deliverable was re-selected from the run's own builds (build 19), no new model spend.
 - Fixes: tool-limit wrap-up at 85% of the limit, helper arguments validated with clear messages and exact signatures in the skill, `edit_build_script` for small fixes.
+
+### Agent v3 fix pass (`wrc-agent-v3-fix`, $0.60 cap): $0.12, 6 model turns
+- The build runner now removes slide placeholders that hold no text (`renderer/prune.js`), so decks have no empty placeholders; verified on the rebuilt deck at no model cost (build 19 had 3, the rebuild has 0, text of all 13 slides identical).
+- `deckgen agent-fix` runs a bounded pass on a finished agent run: starts in the look phase, research tools closed, 8,000 output tokens per turn, only changed slides must be looked at again. Tool-call limit default is now 120 (wrap-up at 85% unchanged).
+- Slides changed: 3, 10, 11, 12, 13. Slides 1, 2, 4 to 9 were not touched and not re-checked by the model. Account spend after the pass: $22.25 of $25.
