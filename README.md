@@ -24,7 +24,8 @@ flowchart LR
 python -m venv .venv && .venv/Scripts/pip install -e ".[dev]"
 npm install
 docker build -f Dockerfile.lo -t deckgen-lo .      # headless LibreOffice + poppler + Carlito/Caladea (or install soffice + pdftoppm)
-cp .env.example .env                              # GEMINI_API_KEY, TAVILY_API_KEY
+cp .env.example .env                              # put your keys here; .env is git-ignored, never commit it
+cp config/anthropic_run.env.example config/anthropic_run.env   # optional: Anthropic role mapping (git-ignored)
 deckgen doctor
 ```
 

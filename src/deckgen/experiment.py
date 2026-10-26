@@ -6,9 +6,9 @@ import json
 import shutil
 import statistics
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 from deckgen import registry
 from deckgen.llm import LLM, Tracer

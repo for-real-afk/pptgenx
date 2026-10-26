@@ -50,7 +50,7 @@ def _run(cmd: list[str], timeout: int, trace: Path | None) -> subprocess.Complet
         else:
             proc.kill()
         out, err = proc.communicate()
-        raise RenderError(f"timeout after {timeout}s: {' '.join(cmd[:4])}")
+        raise RenderError(f"timeout after {timeout}s: {' '.join(cmd[:4])}") from None
     finally:
         if trace:
             trace.parent.mkdir(parents=True, exist_ok=True)
@@ -73,7 +73,7 @@ def pptx_to_pdf(pptx: Path, out_dir: Path, worker_id: str = "0", trace: Path | N
     pdf.unlink(missing_ok=True)
     mode = backend()
     last = ""
-    for attempt in (1, 2):
+    for _attempt in (1, 2):
         if mode == "local":
             profile = Path(tempfile.gettempdir()) / f"lo_profile_{worker_id}"
             cmd = [_local_soffice(), *_soffice_args(profile, str(out_dir), str(pptx))]

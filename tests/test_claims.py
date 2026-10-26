@@ -1,7 +1,9 @@
 """Seeded-bad-slide tests: the claim checks must FLAG every known-bad edit of a known-good slide.
 A check that has never failed on a bad slide proves nothing; these are the known-bad slides."""
-import pytest
+import os
 from pathlib import Path
+
+import pytest
 
 from deckgen.llm import FakeLLM
 from deckgen.schemas import DeckSpec, SlideSpec
@@ -24,12 +26,12 @@ FINDINGS = {
 
 
 def slide(**kw) -> SlideSpec:
-    base = dict(id="s02", section="Rules", layout="TITLE_ONLY", title="Group B rules set a low production bar",
-                composition={"kind": "icon_rows", "items": [
+    base = {"id": "s02", "section": "Rules", "layout": "TITLE_ONLY", "title": "Group B rules set a low production bar",
+                "composition": {"kind": "icon_rows", "items": [
                     {"icon": "FaBook", "heading": "Homologation", "body": "Builders needed 200 road cars in 1982."},
                     {"icon": "FaCarSide", "heading": "Four-wheel drive", "body": "Audi Sport introduced the Quattro."},
                     {"icon": "FaTrophy", "heading": "Title", "body": "Hannu Mikkola won the 1983 drivers title."}]},
-                speaker_notes="Notes.", source_refs=["f01", "f02"])
+                "speaker_notes": "Notes.", "source_refs": ["f01", "f02"]}
     base.update(kw)
     return SlideSpec(**base)
 
@@ -72,7 +74,8 @@ def test_verbatim_copy_is_a_warning_when_short_and_a_hard_gate_when_long():
 
     short = "builders needed 200 road cars in 1982 under the new rules"                       # 11 words
     long_ = short + " and every one of them had to be sold to the public in showrooms"           # 22 words
-    f = lambda snip: {**FINDINGS, "f01": FINDINGS["f01"].model_copy(update={"evidence_snippet": snip})}
+    def f(snip):
+        return {**FINDINGS, "f01": FINDINGS["f01"].model_copy(update={"evidence_snippet": snip})}
     vs = claim_violations(bad(**{"composition.items.0.body": short.capitalize()}), f(short))
     assert [(x.check, x.level) for x in vs if x.check.startswith("copy")] == [("copy_short", "warn")]
     vs = claim_violations(bad(**{"composition.items.0.body": long_.capitalize()}), f(long_))
@@ -113,8 +116,6 @@ def test_coverage_names_dropped_questions_with_reasons():
     cov = coverage(brief, findings, spec)
     assert cov["rules"].startswith("covered") and "no usable findings" in cov["machines"] and "low-confidence" in cov["legacy"]
 
-
-import os
 
 LIVE = pytest.mark.skipif(not os.environ.get("DECKGEN_LIVE") or not os.environ.get("GEMINI_API_KEY"), reason="live LLM test")
 LLM_SEEDS = {
@@ -172,7 +173,7 @@ def test_redundant_slides_are_deleted_not_rewritten(tmp_path):
     from deckgen.schemas.research import Outline, OutlineSlide
     from deckgen.spec.spec_generator import _repair_deck
 
-    vocab = "amber basil cedar delta ember fjord glint haven ivory jaded kappa lunar mango noble ocean pearl quartz raven sable tulip umber vivid wheat xenon yarrow zephyr".split()
+    vocab = ["amber", "basil", "cedar", "delta", "ember", "fjord", "glint", "haven", "ivory", "jaded", "kappa", "lunar", "mango", "noble", "ocean", "pearl", "quartz", "raven", "sable", "tulip", "umber", "vivid", "wheat", "xenon", "yarrow", "zephyr"]
 
     def mk(i, refs, w=None):
         w = i if w is None else w  # w: take the wording of another slide (a near-exact duplicate)
@@ -203,8 +204,8 @@ def test_overlapping_but_distinct_slides_are_kept():
 
 
 def test_checker_issue_blocks_only_when_code_confirms_it():
-    from deckgen.spec.faithfulness import check_slide_text
     from deckgen.spec.claims import name_core
+    from deckgen.spec.faithfulness import check_slide_text
 
     s = slide(id="s02", title="Audi won in 1982", composition=None, placeholders={"body": ["Audi won in 1982", "Mouton drove an invented Zeta GT in 1984"]}, source_refs=["f01"])
     ok = FakeLLM({"faithfulness": {"issues": []}})
@@ -237,8 +238,9 @@ def test_registry_levels_follow_the_profile_and_every_check_has_a_category():
     assert registry.level("composition_capacity", "demoted") == "warn" and registry.level("numbers_need_two_origins_text", "demoted") == "warn"
     assert registry.level("numbers_need_two_origins_stat", "demoted") == "hard"
     assert all(c.category in ("correctness", "model_compensation") for c in registry.CHECKS)
-    from deckgen.spec import claims, rules, validate_spec, faithfulness
     import re
+
+    from deckgen.spec import claims, faithfulness, rules, validate_spec
 
     used = set()
     for mod in (claims, rules, validate_spec, faithfulness):
@@ -289,7 +291,7 @@ def test_redundancy_keeps_the_richer_slide_even_when_it_is_the_later_one(tmp_pat
     from deckgen.schemas.research import Outline, OutlineSlide
     from deckgen.spec.spec_generator import _repair_deck
 
-    vocab = "amber basil cedar delta ember fjord glint haven ivory jaded kappa lunar mango noble ocean pearl quartz raven sable tulip".split()
+    vocab = ["amber", "basil", "cedar", "delta", "ember", "fjord", "glint", "haven", "ivory", "jaded", "kappa", "lunar", "mango", "noble", "ocean", "pearl", "quartz", "raven", "sable", "tulip"]
 
     def mk(i, refs, w=None):
         w = i if w is None else w

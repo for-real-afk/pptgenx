@@ -14,7 +14,7 @@ def load_manifest(brand_dir: Path) -> dict:
 
 def validate_violations(spec: DeckSpec, manifest: dict) -> list[Violation]:
     """Return human-readable errors (empty = valid). Fed back to the spec LLM on retry."""
-    layouts = {l["name"]: l for l in manifest["layouts"]}
+    layouts = {lay["name"]: lay for lay in manifest["layouts"]}
     errs: list[Violation] = []
     for s in spec.slides:
         layout = layouts.get(s.layout)

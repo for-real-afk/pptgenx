@@ -8,8 +8,7 @@ import re
 import zlib
 from collections import Counter
 
-STOP = set("the a an and or of to in on for with as by at from that this these those is are was were be been it its their his her "
-           "which who whom what when where how not no but if than then also into over under about after before during between".split())
+STOP = {"the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with", "as", "by", "at", "from", "that", "this", "these", "those", "is", "are", "was", "were", "be", "been", "it", "its", "their", "his", "her", "which", "who", "whom", "what", "when", "where", "how", "not", "no", "but", "if", "than", "then", "also", "into", "over", "under", "about", "after", "before", "during", "between"}
 _P = (1 << 61) - 1
 _rng = random.Random(1234)
 _PERMS = [(_rng.randrange(1, _P), _rng.randrange(0, _P)) for _ in range(32)]

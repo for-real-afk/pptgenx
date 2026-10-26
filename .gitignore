@@ -1,7 +1,24 @@
-.venv/
-node_modules/
-runs/
-__pycache__/
-*.egg-info/
+# secrets and environment files (keys live only in .env; never commit)
 .env
+.env.*
+!.env.example
+*.env
+!*.env.example
+config/anthropic_run.env
+
+# python / node
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+node_modules/
+
+# generated output: runs, caches, decks, test scratch
+runs/
 outputs/
+tmpdbg*/
+*.pptx

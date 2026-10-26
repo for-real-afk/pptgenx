@@ -8,9 +8,9 @@ from __future__ import annotations
 import json
 import time
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 import yaml
 
@@ -41,7 +41,7 @@ class Prices:
         self.table = table
 
     @classmethod
-    def load(cls, path: Path | None = None) -> "Prices":
+    def load(cls, path: Path | None = None) -> Prices:
         path = path or CONFIG.root / "config" / "prices.yaml"
         if not path.exists():
             raise PriceMissing(f"{path} does not exist: create it with per-million-token prices for every model in use")

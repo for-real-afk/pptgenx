@@ -13,10 +13,10 @@ from deckgen.schemas import DeckSpec, SlideSpec
 from deckgen.schemas.research import Brief, Findings, Outline
 from deckgen.spec.deck_checks import Problem
 from deckgen.spec.edit_loop import apply as apply_spec_edits
-from deckgen.spec.edit_loop import check_all, edit_loop, propose, score
+from deckgen.spec.edit_loop import check_all, propose, score
 from deckgen.spec.spec_generator import SpecGenerationError, _deck_problems, pool_listing, slide_source_text, write_slide
 from deckgen.spec.validate_spec import load_manifest
-from deckgen.spec.violations import Violation, hard
+from deckgen.spec.violations import Violation
 
 MAX_ROUNDS = 2
 GROWTH = 6

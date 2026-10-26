@@ -26,7 +26,8 @@ def two_fakes():
 
 
 def roles(writer=("fakea", "m-writer"), checker=("fakeb", "m-checker")):
-    spec = lambda p, **k: RoleSpec(provider=p[0], model=p[1], **k)
+    def spec(p, **k):
+        return RoleSpec(provider=p[0], model=p[1], **k)
     return {"extractor": spec(writer), "writer": spec(writer), "checker": spec(checker, temperature=0.0), "critic": spec(checker)}
 
 

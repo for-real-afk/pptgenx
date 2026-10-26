@@ -244,7 +244,7 @@ class AgentTools:
         from deckgen.qa.slide_text import content_issues, extract
         from deckgen.schemas.qa import Issue
 
-        names = {l["name"] for l in self.manifest["layouts"]}
+        names = {lay["name"] for lay in self.manifest["layouts"]}
         issues = [Issue(slide=1, type="other", severity="high", description=e, suggested_fix="fix the spec", source="file") for e in validate_pptx.validate(deck, names)]
         return issues + content_issues(extract(deck)) + checks.check(deck)
 
@@ -348,7 +348,8 @@ def tool_definitions() -> list[dict]:
     def obj(**props):
         return {"type": "object", "properties": props, "required": [k for k, v in props.items() if not v.pop("optional", False)]}
 
-    txt = lambda: {"type": "string"}
+    def txt():
+        return {"type": "string"}
     return [
         {"name": "search", "description": "Web search. Returns titles, URLs, snippets (cached, junk domains filtered).", "input_schema": obj(query=txt())},
         {"name": "fetch_page", "description": "Fetch a whole page, save it to sources/<n>.md and return its path, title, length and the first 1,500 characters.", "input_schema": obj(url=txt())},

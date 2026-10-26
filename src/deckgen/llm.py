@@ -6,14 +6,15 @@ per-role budgets, tracing, and parse-validate-retry with the validation error fe
 provider-side schema enforcement: output is always validated with Pydantic here."""
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import time
 from collections import deque
-import dataclasses
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Protocol, TypeVar
+from typing import Protocol, TypeVar
 
 from pydantic import BaseModel, ValidationError
 

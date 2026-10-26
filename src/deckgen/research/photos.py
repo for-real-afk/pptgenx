@@ -177,7 +177,7 @@ class Catalog:
         return json.dumps({"log": self.log, "candidates": {str(n): [c.model_dump() for c in cs] for n, cs in self.cands.items()}}, indent=1)
 
     @classmethod
-    def from_json(cls, text: str, dest_dir: Path) -> "Catalog":
+    def from_json(cls, text: str, dest_dir: Path) -> Catalog:
         import json
 
         d = json.loads(text)

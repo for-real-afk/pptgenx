@@ -10,7 +10,14 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from deckgen.schemas.deck import (
-    CardsComp, ChartSpec, ComparisonComp, IconRowsComp, SlideSpec, StatsComp, TableSpec, TimelineComp,
+    CardsComp,
+    ChartSpec,
+    ComparisonComp,
+    IconRowsComp,
+    SlideSpec,
+    StatsComp,
+    TableSpec,
+    TimelineComp,
 )
 
 CompKind = Literal["none", "cards", "icon_rows", "stats", "timeline", "comparison"]
@@ -76,15 +83,15 @@ def _composition(d: SlideDraft):
     k, it = d.comp_kind, d.items
     try:
         if k == "cards":
-            return CardsComp(kind=k, items=[dict(icon=i.icon, heading=i.heading, body=i.body) for i in it])
+            return CardsComp(kind=k, items=[{"icon": i.icon, "heading": i.heading, "body": i.body} for i in it])
         if k == "icon_rows":
-            return IconRowsComp(kind=k, items=[dict(icon=i.icon, heading=i.heading, body=i.body) for i in it])
+            return IconRowsComp(kind=k, items=[{"icon": i.icon, "heading": i.heading, "body": i.body} for i in it])
         if k == "stats":
-            return StatsComp(kind=k, items=[dict(value=i.value, label=i.label, detail=i.detail or None) for i in it])
+            return StatsComp(kind=k, items=[{"value": i.value, "label": i.label, "detail": i.detail or None} for i in it])
         if k == "timeline":
-            return TimelineComp(kind=k, items=[dict(year=i.year, heading=i.heading, body=i.body) for i in it])
+            return TimelineComp(kind=k, items=[{"year": i.year, "heading": i.heading, "body": i.body} for i in it])
         if k == "comparison":
-            return ComparisonComp(kind=k, items=[dict(heading=i.heading, bullets=i.bullets) for i in it])
+            return ComparisonComp(kind=k, items=[{"heading": i.heading, "bullets": i.bullets} for i in it])
     except ValidationError as e:
         raise DraftConversionError(f"{d.id}: {k} needs a valid item list ({_brief(e)}); respect min/max item counts") from e
     return None

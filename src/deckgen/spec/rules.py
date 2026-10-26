@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-from functools import lru_cache
+from functools import cache
 
 from deckgen.config import CONFIG
 from deckgen.schemas import SlideSpec
@@ -19,7 +19,7 @@ SHORT_TITLE_OK = {"TITLE", "SECTION", "SOURCES", "CLOSING"}
 NUM = re.compile(r"\d[\d,]*\.?\d*")
 
 
-@lru_cache(maxsize=None)
+@cache
 def _pack_names(pack: str) -> frozenset[str]:
     js = f"try{{console.log(JSON.stringify(Object.keys(require('react-icons/{pack}'))))}}catch(e){{console.log('[]')}}"
     r = subprocess.run(["node", "-e", js], capture_output=True, text=True, cwd=CONFIG.root)
@@ -40,7 +40,8 @@ def _fmt(val: float) -> str:
 
 def check_slide_v(s: SlideSpec, findings: dict[str, Finding], prev: list[SlideSpec], extra: str = "") -> list[Violation]:
     e: list[Violation] = []
-    n_words = lambda t: len(t.split())
+    def n_words(t):
+        return len(t.split())
     if s.layout not in SHORT_TITLE_OK and n_words(s.title) < 4:
         e.append(v("title_states_message", f"title '{s.title}' must state the message (at least 4 words)"))
     if s.layout not in SHORT_TITLE_OK and len(s.title) > capacity.title_limit():
@@ -69,9 +70,8 @@ def check_slide_v(s: SlideSpec, findings: dict[str, Finding], prev: list[SlideSp
         for b in body:
             if n_words(b) > CONFIG.max_words_per_bullet or len(b) > cmax:
                 e.append(v("bullet_caps", f"bullet '{b[:40]}...' too long (max {CONFIG.max_words_per_bullet} words, {cmax} chars)"))
-    if s.layout == "CLOSING" and isinstance(body, list):
-        if len(body) > 4 or any(len(b) > 80 for b in body):
-            e.append(v("bullet_caps", "CLOSING takes at most 4 bullets of at most 80 chars each"))
+    if s.layout == "CLOSING" and isinstance(body, list) and (len(body) > 4 or any(len(b) > 80 for b in body)):
+        e.append(v("bullet_caps", "CLOSING takes at most 4 bullets of at most 80 chars each"))
 
     # composition capacity + grounding
     c = s.composition

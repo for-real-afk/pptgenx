@@ -96,7 +96,8 @@ def test_wrong_year_finding_is_excluded_from_slides_and_listed_for_review():
 
 def test_research_runs_rounds_until_the_pool_target_and_reports_counts(monkeypatch, tmp_path):
     from deckgen.config import Config
-    from deckgen.research import agent, tools as tools_mod
+    from deckgen.research import agent
+    from deckgen.research import tools as tools_mod
     from deckgen.research.tools import Budget, ResearchTools, SearchResult
     from deckgen.schemas.research import Brief
 

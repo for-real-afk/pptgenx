@@ -1,7 +1,7 @@
 import pytest
 
-from deckgen.schemas.draft import DraftConversionError, ItemDraft, SlideDraft, draft_to_slide
 from deckgen.schemas.deck import SlideSpec
+from deckgen.schemas.draft import DraftConversionError, ItemDraft, SlideDraft, draft_to_slide
 
 
 def base(**kw):

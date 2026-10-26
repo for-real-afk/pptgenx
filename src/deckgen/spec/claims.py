@@ -132,7 +132,7 @@ def claim_violations(s: SlideSpec, findings: dict[str, Finding], extra: str = ""
     fields = visible_fields(s)
 
     # 1. strong wording the findings do not use
-    for field, text in fields:
+    for _field, text in fields:
         for m in OVERCLAIM_RE.finditer(text):
             if not re.search(rf"(?<![-\w]){re.escape(m.group(1).lower())}(?![-\w])", low):
                 out.append(v("overclaim_word", f"'{m.group(1)}' in '{text[:50]}' overstates: the cited findings never say it (use plain wording)"))
@@ -158,7 +158,7 @@ def claim_violations(s: SlideSpec, findings: dict[str, Finding], extra: str = ""
                 out.append(v("name_in_body_grounded", f"name '{m.group(0)}' in '{text[:50]}' does not appear in the cited findings"))
     # 4. verbatim copying of source wording: a long run is a hard gate, a shorter run only a warning
     snippets = [re.findall(r"[a-z0-9']+", findings[r].evidence_snippet.lower()) for r in s.source_refs if r in findings]
-    for field, text in fields:
+    for _field, text in fields:
         toks = re.findall(r"[a-z0-9']+", text.lower())
         for sn in snippets:
             if _has_run(toks, sn, CONFIG.copy_hard_words):
@@ -169,7 +169,7 @@ def claim_violations(s: SlideSpec, findings: dict[str, Finding], extra: str = ""
                 break
     # 5. spelling: unknown words that fewer than two independent origins use are typos until proven otherwise
     seen: set[str] = set()
-    for field, text in fields:
+    for _field, text in fields:
         for w in WORD_RE.findall(text):
             if w in seen or w in _KNOWN:
                 continue

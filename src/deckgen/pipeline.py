@@ -5,9 +5,9 @@ import json
 import re
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 from deckgen import registry
 from deckgen.config import CONFIG
@@ -15,13 +15,13 @@ from deckgen.llm import LLM, Tracer
 from deckgen.planning import outliner, planner
 from deckgen.qa import fix_loop, policy, soffice, validate_pptx
 from deckgen.research.agent import run_research
+from deckgen.research.datasets import DataSets
 from deckgen.research.tools import ResearchTools
 from deckgen.research.weigh import TierTable
 from deckgen.schemas import DeckSpec
 from deckgen.schemas.qa import QAReport
 from deckgen.schemas.research import Brief, Findings, Outline
 from deckgen.spec.deck_checks import coverage
-from deckgen.research.datasets import DataSets
 from deckgen.spec.spec_generator import domain, generate_spec
 
 STAGES = ["plan", "research", "outline", "spec", "qa", "report"]
@@ -216,7 +216,7 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
         images = soffice.render_deck(deck, run_dir / "final")
     except soffice.RenderError as e:
         render_error = str(e)
-    names = {l["name"] for l in json.loads((brand_dir / "manifest.json").read_text(encoding="utf-8"))["layouts"]}
+    names = {lay["name"] for lay in json.loads((brand_dir / "manifest.json").read_text(encoding="utf-8"))["layouts"]}
 
     by_id = {f.id: f for f in findings.findings}
     used_ids = sorted({r for s in spec.slides for r in s.source_refs})
@@ -328,9 +328,8 @@ def quality_metrics(spec: DeckSpec, requested: int) -> dict:
 
 def export_outputs(run_dir: Path, deck: Path, label: str | None = None) -> Path:
     """Copy the finished deck and its companion files into <root>/outputs/<label>/ (a plain folder next to the code, outside runs/)."""
-    import shutil
-
     import os
+    import shutil
 
     dest = Path(os.environ.get("DECKGEN_OUTPUTS_DIR") or CONFIG.root / "outputs") / (label or run_dir.name)
     dest.mkdir(parents=True, exist_ok=True)

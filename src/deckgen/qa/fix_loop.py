@@ -54,7 +54,7 @@ def build(spec: DeckSpec, brand_dir: Path, out: Path) -> None:
 
 def inspect(deck: Path, images: list[Path], numbers: list[int], llm: LLM, brand_dir: Path, *, consistency: bool) -> list[Issue]:
     """File + content + automated checks on the whole deck; critic only on `numbers`."""
-    names = {l["name"] for l in load_manifest(brand_dir)["layouts"]}
+    names = {lay["name"] for lay in load_manifest(brand_dir)["layouts"]}
     issues = [Issue(slide=1, type="other", severity="high", description=e, suggested_fix="fix in generator", source="file")
               for e in validate_pptx.validate(deck, names)]
     issues += content_issues(extract(deck))

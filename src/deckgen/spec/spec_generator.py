@@ -17,6 +17,9 @@ from pydantic import BaseModel, ConfigDict
 
 from deckgen.config import CONFIG
 from deckgen.llm import LLM
+from deckgen.research.facts import _toks as _fact_toks
+from deckgen.research.facts import odd_ones
+from deckgen.research.photos import listing as photo_listing
 from deckgen.schemas import DeckSpec, SlideSpec
 from deckgen.schemas.draft import SlideDraft, draft_to_slide
 from deckgen.schemas.research import Brief, Finding, Findings, Outline, OutlineSlide
@@ -27,10 +30,7 @@ from deckgen.spec.edit_loop import apply as apply_spec_edits
 from deckgen.spec.edit_loop import check_all, edit_loop, propose, score
 from deckgen.spec.rules import check_slide_v
 from deckgen.spec.validate_spec import load_manifest, validate_spec
-from deckgen.research.facts import _toks as _fact_toks
-from deckgen.research.facts import odd_ones
-from deckgen.research.photos import listing as photo_listing
-from deckgen.spec.violations import Violation, classify_failure, hard, v
+from deckgen.spec.violations import Violation, classify_failure, hard
 from deckgen.spec.writer_prompt import select_source_text, stable_prefix, variable_part
 
 NL = chr(10)
@@ -55,16 +55,17 @@ def domain(url: str) -> str:
 
 def _layout_menu(brand_dir: Path) -> str:
     out = []
-    for l in load_manifest(brand_dir)["layouts"]:
-        if l["name"] == "SOURCES":
+    for lay in load_manifest(brand_dir)["layouts"]:
+        if lay["name"] == "SOURCES":
             continue
-        phs = ", ".join(f"{p['name']}(aim <= {int(p['max_chars'] * CONFIG.prompt_aim)} chars)" if p["max_chars"] else p["name"] for p in l["placeholders"])
-        out.append(f"- {l['name']}: {l['use_when']} Placeholders: {phs}")
+        phs = ", ".join(f"{p['name']}(aim <= {int(p['max_chars'] * CONFIG.prompt_aim)} chars)" if p["max_chars"] else p["name"] for p in lay["placeholders"])
+        out.append(f"- {lay['name']}: {lay['use_when']} Placeholders: {phs}")
     return "\n".join(out)
 
 
 def _limits_menu() -> str:
-    A = lambda x: int(x * CONFIG.prompt_aim)  # show the model targets below the hard limits: models cannot count characters exactly
+    def A(x):
+        return int(x * CONFIG.prompt_aim)  # show the model targets below the hard limits: models cannot count characters exactly
     rows = [f"title: aim for at most {capacity.title_aim()} chars (one line) (content layouts, must state the message)"]
     for kind, ns in (("cards", (2, 3, 4, 6)), ("stats", (2, 3, 4)), ("timeline", (3, 4, 5)), ("icon_rows", (2, 3, 4, 5))):
         for n in ns:
@@ -292,7 +293,7 @@ def _fallback_slide(llm: LLM, o: OutlineSlide, cited: list[Finding], findings: d
     icons = ["FaBook", "FaFlagCheckered", "FaHistory"]
     title = o.key_message if len(o.key_message) <= capacity.title_limit() and not o.key_message.endswith(".") else o.section
     s = SlideSpec(id=f"s{o.n:02d}", section=o.section, layout="TITLE_ONLY", title=title,
-                  composition={"kind": "icon_rows", "items": [dict(icon=icons[i], heading=labels[i], body=picks[i].claim) for i in range(3)]},
+                  composition={"kind": "icon_rows", "items": [{"icon": icons[i], "heading": labels[i], "body": picks[i].claim} for i in range(3)]},
                   speaker_notes="Built directly from the research findings: " + " ".join(f.claim for f in picks),
                   source_refs=[f.id for f in picks], source_caption=_caption([f.id for f in picks], findings))
     return s if _correct(s, findings, prev) else None
@@ -397,7 +398,7 @@ def _resolved_entry(p: Problem, sheet):
     return None
 
 
-def _small_fix(llm, slides, n, by_id, manifest, deck_title, brand, message, facts_line, entry_name, source) -> dict:
+def small_fix(llm, slides, n, by_id, manifest, deck_title, brand, message, facts_line, entry_name, source) -> dict:
     """One small diff (no added words) on slide n; kept only if the slide is no worse on the hard gates. Mutates `slides` in place."""
     s = slides[n - 1]
     rec = {"slide": n, "entry": entry_name, "found_by": source, "result": "unchanged"}
@@ -443,14 +444,14 @@ def _repair_deck(llm: LLM, brief: Brief, outline: Outline, by_id: dict[str, Find
                 continue
             msg = (f"contradiction with slide(s) {[m for m in p.slides if m != n]}: {p.description}. The slide's statement '{q.text}' must follow the facts sheet "
                    f"({entry.value}).")
-            fixed.append(_small_fix(llm, slides, n, by_id, manifest, outline.deck_title, brief.brand, msg, line, f"{entry.subject} / {entry.attribute}", "llm-checker"))
+            fixed.append(small_fix(llm, slides, n, by_id, manifest, outline.deck_title, brief.brand, msg, line, f"{entry.subject} / {entry.attribute}", "llm-checker"))
     if sheet is not None:  # post-write check: a slide that quotes a different value for a sheet entry gets one small diff toward the sheet's wording
         for o in odd_ones(slides, sheet):
             n, e = o["slide"], sheet.entries[o["entry"]]
             if n in drop or any(f["slide"] == n and f["entry"] == f"{e.subject} / {e.attribute}" for f in fixed):
                 continue
             line = f"FACTS SHEET: {e.subject} / {e.attribute}: {e.value}. Use exactly this."
-            fixed.append(_small_fix(llm, slides, n, by_id, manifest, outline.deck_title, brief.brand,
+            fixed.append(small_fix(llm, slides, n, by_id, manifest, outline.deck_title, brief.brand,
                                     f"this slide quotes '{o['found']}' for {e.subject} / {e.attribute}, but the facts sheet wording is: {e.value}", line,
                                     f"{e.subject} / {e.attribute}", "facts-sheet"))
     dropped_titles = [slides[n - 1].title for n in sorted(drop)]

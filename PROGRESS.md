@@ -133,3 +133,14 @@ heading-name check, two-source numbers); fetch full pages for research (6000-cha
 - Behind default-on flags (`DECKGEN_WRITER_SOURCE_TEXT`, `DECKGEN_WRITER_CHOOSES_LAYOUT`, `DECKGEN_HEDGE_CONTESTED`): verbatim source passages to the writer, layout chosen per slide (hint only),
   equal-weight conflicts kept as `contested` and hedged; every slide's speaker notes end with its sources (+ "Verify:" for contested/single-source). No new check types.
 - Tests: cap hit mid-run with a fake provider (never exceeded, summary written), soft warnings, cache-token pricing, prompt split. NOT run live yet.
+
+## Development log: rounds 3 to 8 (what was built, what each live run showed)
+Live runs used Anthropic (Haiku 5.5 for reading, Sonnet 5.5 for writing) under a hard USD cap with every call in `usage.jsonl`. Costs below are from the ledger.
+- **r3** (staged pipeline, per-slide writer, fact-check as veto): 8 of 14 slides, $1.05. Cause: the checker saw less than the writer and flagged supported text, so 5 of 7 content slides became plain fallbacks.
+- **r4**: checker sees the writer's passages and returns a strict issue list that only blocks when code confirms it: 14 of 14, 0 fallbacks, $0.74. Cross-slide contradictions remained.
+- **r5/r6** (facts sheet, repair rounds, whole-deck writer): contradiction count did not fall; repair was the most expensive stage and fixed little. A bug meant the whole-deck drafts never reached the slide checks until r8.
+- **r7**: repair off by default, one LLM cross-slide check, hedging/layout rules, retry once with more room when cut off: 14 of 14, $0.99, retry waste down from 36% to 4%.
+- **r8** (fix pass): passage relevance filter, facts-sheet odd-one-out fix, targeted slide fixes; 0 blocking issues, $1.27 cumulative.
+- **Agent loop (v2, `deckgen agent`)**: one Sonnet agent with search / fetch_page / read_source / summarize_sources / files / validate_spec / build_deck / render_slides / finish, a skill file (`skills/deck_agent/SKILL.md`) and a budget guard before every call. a1 crashed on a replayed thinking block; a2 never viewed a slide (render bug, 0 views); a3 viewed all 12 slides and was stopped by the $8 budget guard at $7.71 with 12 of 14 slides built.
+- Known gaps: no photos live (needs `DECKGEN_CONTACT`; Wikimedia returned 403 without a contact), PowerPoint opening not verified, cross-slide checker output is noisy, checker is the same model family as the writer.
+- Cleanup: `cli.py` is options-and-printing only; orchestration is in `workflows.py`, health checks in `doctor.py`; ruff config in `pyproject.toml`; env files are untracked (`.env.example` and `config/anthropic_run.env.example` document the variables).

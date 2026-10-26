@@ -2,7 +2,6 @@
 the visual critic covers what needs eyes."""
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
@@ -33,11 +32,11 @@ class Box:
     @property
     def b(self) -> float: return self.y + self.h
 
-    def inter(self, o: "Box") -> float:
+    def inter(self, o: Box) -> float:
         iw, ih = min(self.r, o.r) - max(self.x, o.x), min(self.b, o.b) - max(self.y, o.y)
         return iw * ih if iw > 0 and ih > 0 else 0.0
 
-    def contains(self, o: "Box", tol: float = 0.03) -> bool:
+    def contains(self, o: Box, tol: float = 0.03) -> bool:
         return o.x >= self.x - tol and o.y >= self.y - tol and o.r <= self.r + tol and o.b <= self.b + tol
 
 
@@ -74,7 +73,7 @@ def estimate_text_height(sh) -> float | None:
 def check(pptx: Path) -> list[Issue]:
     issues: list[Issue] = []
     for n, slide in enumerate(Presentation(pptx).slides, 1):
-        def add(t, sev, desc, fix):
+        def add(t, sev, desc, fix, n=n):
             issues.append(Issue(slide=n, type=t, severity=sev, description=desc, suggested_fix=fix, source="auto"))
 
         shapes = [s for s in slide.shapes

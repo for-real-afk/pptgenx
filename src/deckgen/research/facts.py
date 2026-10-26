@@ -106,7 +106,7 @@ def decide(g: Group, by_id: dict[str, Finding]) -> Entry | None:
     ranked = sorted(ms, key=lambda m: weight(by_id[m.id]), reverse=True)
     best = ranked[0]
     rivals = [m for m in ranked[1:] if _norm(m.value) != _norm(best.value)]
-    base = dict(subject=g.subject, attribute=g.attribute, values=list(dict.fromkeys(m.value for m in ranked)), ids=[m.id for m in ranked])
+    base = {"subject": g.subject, "attribute": g.attribute, "values": list(dict.fromkeys(m.value for m in ranked)), "ids": [m.id for m in ranked]}
     if all(weight(by_id[best.id]) > weight(by_id[m.id]) for m in rivals):
         return Entry(**base, status="resolved", value=best.value, tier=by_id[best.id].tier, source=domain(by_id[best.id].source_url))
     tied = [best] + [m for m in rivals if weight(by_id[m.id]) == weight(by_id[best.id])]

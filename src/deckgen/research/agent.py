@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import math
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TypedDict
 
 from langgraph.graph import END, StateGraph
@@ -112,7 +112,7 @@ def build_agent(llm: LLM, tools: ResearchTools, brief: Brief, table: TierTable, 
             for rf in [r for r in raw.findings if not is_meta(r.claim)][:5]:
                 new.append(Finding(
                     id="", question=q, claim=rf.claim.strip(), evidence_snippet=rf.evidence_snippet.strip()[:300], source_type=stype,
-                    source_url=res.url, source_title=res.title[:120], retrieved_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    source_url=res.url, source_title=res.title[:120], retrieved_at=datetime.now(UTC).isoformat(timespec="seconds"),
                     confidence="low" if hits else rf.confidence, flagged=bool(hits), page_sig=sig))
         return {**st, "findings": st["findings"] + new, "seen": st["seen"] + [p.url for p in pages], "flagged_pages": flagged, "passages": kept_passages}
 

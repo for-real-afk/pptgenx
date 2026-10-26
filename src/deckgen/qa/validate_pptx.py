@@ -99,9 +99,8 @@ def validate(pptx: Path, layout_names: set[str] | None = None) -> list[str]:
 
 def _chart_errors(name: str, raw: str, root) -> list[str]:
     errs = []
-    if "<c:grouping val=\"stacked\"" in raw or "<c:grouping val=\"percentStacked\"" in raw:
-        if re.search(r'<c:dLblPos val="outEnd"', raw):
-            errs.append(f"{name}: stacked chart with dLblPos outEnd (PowerPoint repairs the file)")
+    if ("<c:grouping val=\"stacked\"" in raw or "<c:grouping val=\"percentStacked\"" in raw) and re.search(r'<c:dLblPos val="outEnd"', raw):
+        errs.append(f"{name}: stacked chart with dLblPos outEnd (PowerPoint repairs the file)")
     n_val = len(re.findall(r"<c:valAx>", raw))
     n_cat = len(re.findall(r"<c:(catAx|dateAx)>", raw))
     if n_val != n_cat and (n_val > 2 or n_cat > 2):

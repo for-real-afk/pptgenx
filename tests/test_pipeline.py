@@ -14,7 +14,14 @@ from deckgen.schemas import DeckSpec, SlideSpec
 from deckgen.schemas.draft import ItemDraft, SeriesDraft, SlideDraft, draft_to_slide
 from deckgen.schemas.qa import CriticReport
 from deckgen.schemas.research import (
-    ConflictReport, Finding, Outline, OutlineSlide, QueryPlan, QuestionPlan, RawFinding, RawFindings,
+    ConflictReport,
+    Finding,
+    Outline,
+    OutlineSlide,
+    QueryPlan,
+    QuestionPlan,
+    RawFinding,
+    RawFindings,
 )
 from deckgen.spec import capacity
 from deckgen.spec.rules import check_slide
@@ -45,8 +52,8 @@ def extract(prompt, images):
 
 def slide_draft(prompt, images):
     n = int(re.search(r"id=s(\d\d)", prompt).group(1))
-    base = dict(id=f"s{n:02d}", section="S", speaker_notes="Detail goes here. It has two sentences.",
-                source_refs={2: ["f01", "f02"], 3: ["f03", "f04"], 4: ["f05", "f06"]}.get(n, ["f01", "f02"]))
+    base = {"id": f"s{n:02d}", "section": "S", "speaker_notes": "Detail goes here. It has two sentences.",
+                "source_refs": {2: ["f01", "f02"], 3: ["f03", "f04"], 4: ["f05", "f06"]}.get(n, ["f01", "f02"])}
     if n == 1:
         return SlideDraft(**{**base, "source_refs": []}, layout="TITLE", title="Group B in brief", subtitle="Rules, cars and the ban")
     if n == 2:
@@ -139,15 +146,15 @@ def test_every_composition_at_max_capacity_fits(tmp_path):
                                 composition={"kind": kind, "items": [make(lim, i) for i in range(n)]}))
 
     for n in (2, 3, 4, 6):
-        add("cards", n, lambda lim, i: dict(icon="FaCogs", heading=_words(lim["heading"]), body=_words(lim["body"])))
+        add("cards", n, lambda lim, i: {"icon": "FaCogs", "heading": _words(lim["heading"]), "body": _words(lim["body"])})
     for n in (2, 3, 4):
-        add("stats", n, lambda lim, i: dict(value="9" * lim["value"], label=_words(lim["label"]), detail=_words(lim["detail"])))
+        add("stats", n, lambda lim, i: {"value": "9" * lim["value"], "label": _words(lim["label"]), "detail": _words(lim["detail"])})
     for n in (3, 4, 5):
-        add("timeline", n, lambda lim, i: dict(year="1" * lim["year"], heading=_words(lim["heading"]), body=_words(lim["body"])))
+        add("timeline", n, lambda lim, i: {"year": "1" * lim["year"], "heading": _words(lim["heading"]), "body": _words(lim["body"])})
     for n in (2, 3, 4, 5):
-        add("icon_rows", n, lambda lim, i: dict(icon="FaCogs", heading=_words(lim["heading"]), body=_words(lim["body"])))
+        add("icon_rows", n, lambda lim, i: {"icon": "FaCogs", "heading": _words(lim["heading"]), "body": _words(lim["body"])})
     nb = capacity.comparison_max_bullets()
-    add("comparison", 2, lambda lim, i: dict(heading=_words(lim["heading"]), bullets=[_words(lim["bullet"])] * nb))
+    add("comparison", 2, lambda lim, i: {"heading": _words(lim["heading"]), "bullets": [_words(lim["bullet"])] * nb})
     spec = DeckSpec(title="Capacity", brand="default_v1", slides=slides)
     p = tmp_path / "cap.json"
     p.write_text(spec.model_dump_json(exclude_none=True))

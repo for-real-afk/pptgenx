@@ -174,7 +174,7 @@ def resolve(findings: list[Finding], confirmed: set[frozenset]) -> tuple[list[Fi
         links.setdefault(a.id, set()).add(b.id)
         links.setdefault(b.id, set()).add(a.id)
         wa, wb = weight(a), weight(b)
-        rec = dict(ids=[a.id, b.id], claims=[a.claim, b.claim], sources=[a.source_url, b.source_url])
+        rec = {"ids": [a.id, b.id], "claims": [a.claim, b.claim], "sources": [a.source_url, b.source_url]}
         if wa != wb:
             win, lose = (a, b) if wa > wb else (b, a)
             excluded.setdefault(lose.id, f"outweighed by {win.id}: tier {win.tier} vs {lose.tier}, origins {win.independent_origin_count} vs {lose.independent_origin_count}")

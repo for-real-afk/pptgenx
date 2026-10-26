@@ -1,7 +1,7 @@
 """Strict DeckSpec: what the spec LLM emits and the Node renderer consumes. No coordinates, no OOXML."""
 from __future__ import annotations
 
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -59,7 +59,7 @@ class ComparisonComp(_Strict):
 
 
 Composition = Annotated[
-    Union[CardsComp, IconRowsComp, StatsComp, TimelineComp, ComparisonComp], Field(discriminator="kind")
+    CardsComp | IconRowsComp | StatsComp | TimelineComp | ComparisonComp, Field(discriminator="kind")
 ]
 
 

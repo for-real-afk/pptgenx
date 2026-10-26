@@ -6,7 +6,6 @@ from deckgen.research.facts import Group, Member, Sheet, decide
 from deckgen.schemas import DeckSpec
 from deckgen.schemas.research import Brief, Finding, Findings, Outline, OutlineSlide
 from deckgen.spec.repair import repair_deck
-
 from test_claims import FINDINGS, slide
 
 
@@ -140,7 +139,7 @@ def test_cut_off_answer_retries_with_more_room_and_fixer_retries_once(tmp_path):
     from deckgen.providers.base import RawResult
     from deckgen.providers.fake import Adapter as FakeAdapter
 
-    class O(BaseModel):
+    class Out(BaseModel):
         x: int
 
     class Cutting(FakeAdapter):
@@ -153,13 +152,13 @@ def test_cut_off_answer_retries_with_more_room_and_fixer_retries_once(tmp_path):
     a.script = ['{"x": 1', '{"x": 1}']
     roles = {r: RoleSpec(provider="cutter", model="m", max_tokens=500) for r in ("extractor", "writer", "checker", "critic")}
     llm = RoleLLM(roles, Tracer(tmp_path / "t.jsonl"), cache_dir=tmp_path / "c", use_cache=False, limiter_factory=lambda p: RateLimiter(None, clock=lambda: 0.0, sleep=lambda s: None))
-    assert llm.generate(stage="facts_sheet", system="s", prompt="p", schema=O).x == 1
+    assert llm.generate(stage="facts_sheet", system="s", prompt="p", schema=Out).x == 1
     assert len(a.calls) == 2                                                                  # cut off once, retried once (with the limit raised to 1000)
     a2 = FakeAdapter()
     register("cutter", a2)
     a2.script = ['{"y": 1}', '{"y": 2}', '{"x": 3}']
     try:
-        llm.generate(stage="fixer", system="s", prompt="p2", schema=O)
+        llm.generate(stage="fixer", system="s", prompt="p2", schema=Out)
         raise AssertionError("expected a failure after one retry")
     except ValueError as e:
         assert "after 2 attempts" in str(e) and len(a2.calls) == 2                            # fixer: one validation-error retry only
