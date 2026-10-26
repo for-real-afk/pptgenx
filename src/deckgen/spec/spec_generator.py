@@ -28,6 +28,7 @@ from deckgen.spec.edit_loop import check_all, edit_loop, propose, score
 from deckgen.spec.rules import check_slide_v
 from deckgen.spec.validate_spec import load_manifest, validate_spec
 from deckgen.research.facts import _toks as _fact_toks
+from deckgen.research.facts import odd_ones
 from deckgen.research.photos import listing as photo_listing
 from deckgen.spec.violations import Violation, classify_failure, hard, v
 from deckgen.spec.writer_prompt import select_source_text, stable_prefix, variable_part
@@ -105,12 +106,15 @@ def sources_slide(n: int, used: list[Finding]) -> SlideSpec:
     seen: dict[str, Finding] = {}
     for f in sorted(used, key=lambda f: (-f.tier, -f.independent_origin_count)):
         seen.setdefault(f.source_url, f)
-    entries = []
-    for f in list(seen.values())[:MAX_SOURCES]:
-        title = f.source_title or domain(f.source_url)
+    entries: list[str] = []
+    for f in seen.values():
+        title = (f.source_title or domain(f.source_url)).strip(" ,;:-|")  # a title split on '|' can leave a stray pipe at either end
         if len(title) > 60:
             title = title[:60].rsplit(" ", 1)[0].rstrip(" ,;:-|") + "..."
-        entries.append(f"{title} ({domain(f.source_url)})")
+        entry = f"{title} ({domain(f.source_url)})"
+        if entry.lower() not in {e.lower() for e in entries}:  # the same page title from one site listed twice is one source
+            entries.append(entry)
+    entries = entries[:MAX_SOURCES]
     return SlideSpec(id=f"s{n:02d}", section="Sources", layout="SOURCES", title="Sources",
                      placeholders={"body": entries or ["No external sources used."]},
                      speaker_notes="Sources actually used in this deck. Retrieval dates are in findings.json.")
@@ -307,15 +311,19 @@ def closing_from_titles(o: OutlineSlide, slides: list[SlideSpec], by_id: dict[st
 
 
 def generate_spec(llm: LLM, brief: Brief, outline: Outline, findings: Findings, brand_dir: Path,
-                  run_dir: Path | None = None, photos=None, facts_text: str = "", data=None, sheet=None) -> DeckSpec:
-    by_id = {f.id: f for f in findings.findings if not f.excluded}  # outweighed or contested findings never reach slides
+                  run_dir: Path | None = None, photos=None, facts_text: str = "", data=None, sheet=None, pfilter=None) -> DeckSpec:
+    gone = set(pfilter.dropped_finding_ids) if pfilter else set()   # findings that came from a passage the relevance filter dropped
+    by_id = {f.id: f for f in findings.findings if not f.excluded and f.id not in gone}  # outweighed, contested or filtered-out findings never reach slides
+    passages = pfilter.kept if pfilter else findings.passages
+    if gone:
+        outline = outline.model_copy(update={"slides": [o.model_copy(update={"finding_ids": [i for i in o.finding_ids if i not in gone]}) for o in outline.slides]})
     slides: list[SlideSpec] = []
     dropped: list[dict] = []
     notes: dict = {}
     last_n = len(outline.slides)
     from deckgen.spec.deck_writer import write_deck  # lazy: deck_writer imports this module
 
-    first = write_deck(llm, brief, outline, by_id, brand_dir, findings.passages, facts_text, photos, data) if CONFIG.whole_deck else {}
+    first = write_deck(llm, brief, outline, by_id, brand_dir, passages, facts_text, photos, data) if CONFIG.whole_deck else {}
     for o in outline.slides:
         if o.n == 1 and o.layout_hint == "TITLE":
             slides.append(title_slide(brief, outline, o))  # built from the request, never from findings
@@ -328,7 +336,7 @@ def generate_spec(llm: LLM, brief: Brief, outline: Outline, findings: Findings, 
             o = o.model_copy(update={"finding_ids": earlier[:8] or o.finding_ids})
         try:
             slides.append(build_slide(llm, brief, o, outline, by_id, brand_dir, slides, o.n == last_n, notes, cache,
-                                      passages=findings.passages, photos=photos, facts_text=facts_text, data=data))
+                                      passages=passages, photos=photos, facts_text=facts_text, data=data, first=first.get(o.n)))
         except SpecGenerationError as e:
             if o.n == last_n and (cl := closing_from_titles(o, slides, by_id)) is not None:
                 slides.append(cl)
@@ -389,6 +397,23 @@ def _resolved_entry(p: Problem, sheet):
     return None
 
 
+def _small_fix(llm, slides, n, by_id, manifest, deck_title, brand, message, facts_line, entry_name, source) -> dict:
+    """One small diff (no added words) on slide n; kept only if the slide is no worse on the hard gates. Mutates `slides` in place."""
+    s = slides[n - 1]
+    rec = {"slide": n, "entry": entry_name, "found_by": source, "result": "unchanged"}
+    try:
+        base = check_all(llm, s, by_id, slides[:n - 1], manifest, deck_title, brand, faith=False)
+        problem = Violation("deck_contradiction", message, "hard")
+        cand = apply_spec_edits(s, propose(llm, s, base + [problem], by_id, pool_listing(by_id, 40), "", facts_line), by_id)
+        after = check_all(llm, cand, by_id, slides[:n - 1], manifest, deck_title, brand, faith=False)
+        if cand != s and score(after) <= score(base):
+            slides[n - 1] = cand
+            rec["result"] = "edited"
+    except Exception as e:  # noqa: BLE001 - a failed fix keeps the slide; the problem stays on the review list
+        rec["result"] = f"rejected: {str(e)[:100]}"
+    return rec
+
+
 def _repair_deck(llm: LLM, brief: Brief, outline: Outline, by_id: dict[str, Finding], brand_dir: Path,
                  slides: list[SlideSpec], run_dir: Path | None, extra: dict | None = None, sheet=None) -> list[SlideSpec]:
     """ONE LLM cross-slide check. Then: a near-exact duplicate slide is deleted (keep the richer; never title, closing or sources; never below the
@@ -416,20 +441,18 @@ def _repair_deck(llm: LLM, brief: Brief, outline: Outline, by_id: dict[str, Find
             n = q.slide
             if not 1 < n < last or n in drop or slides[n - 1].layout in ("TITLE", "SOURCES") or any(f["slide"] == n for f in fixed):
                 continue
-            s = slides[n - 1]
-            base = check_all(llm, s, by_id, slides[:n - 1], manifest, outline.deck_title, brief.brand, faith=False)
-            problem = Violation("deck_contradiction", f"contradiction with slide(s) {[m for m in p.slides if m != n]}: {p.description}. The slide's statement "
-                                f"'{q.text}' must follow the facts sheet ({entry.value}).", "hard")
-            rec = {"slide": n, "entry": f"{entry.subject} / {entry.attribute}", "result": "unchanged"}
-            try:
-                cand = apply_spec_edits(s, propose(llm, s, base + [problem], by_id, pool_listing(by_id, 40), "", line), by_id)
-                after = check_all(llm, cand, by_id, slides[:n - 1], manifest, outline.deck_title, brief.brand, faith=False)
-                if cand != s and score(after) <= score(base):
-                    slides[n - 1] = cand
-                    rec["result"] = "edited"
-            except Exception as e:  # noqa: BLE001 - a failed fix keeps the slide; the problem stays on the review list
-                rec["result"] = f"rejected: {str(e)[:100]}"
-            fixed.append(rec)
+            msg = (f"contradiction with slide(s) {[m for m in p.slides if m != n]}: {p.description}. The slide's statement '{q.text}' must follow the facts sheet "
+                   f"({entry.value}).")
+            fixed.append(_small_fix(llm, slides, n, by_id, manifest, outline.deck_title, brief.brand, msg, line, f"{entry.subject} / {entry.attribute}", "llm-checker"))
+    if sheet is not None:  # post-write check: a slide that quotes a different value for a sheet entry gets one small diff toward the sheet's wording
+        for o in odd_ones(slides, sheet):
+            n, e = o["slide"], sheet.entries[o["entry"]]
+            if n in drop or any(f["slide"] == n and f["entry"] == f"{e.subject} / {e.attribute}" for f in fixed):
+                continue
+            line = f"FACTS SHEET: {e.subject} / {e.attribute}: {e.value}. Use exactly this."
+            fixed.append(_small_fix(llm, slides, n, by_id, manifest, outline.deck_title, brief.brand,
+                                    f"this slide quotes '{o['found']}' for {e.subject} / {e.attribute}, but the facts sheet wording is: {e.value}", line,
+                                    f"{e.subject} / {e.attribute}", "facts-sheet"))
     dropped_titles = [slides[n - 1].title for n in sorted(drop)]
     if drop:
         slides = [s for k, s in enumerate(slides, 1) if k not in drop]

@@ -61,6 +61,23 @@ def _facts_sheet(llm, findings, run_dir: Path, ledger, force: int):
     return sheet
 
 
+def _passage_filter(llm, outline, findings, run_dir: Path, ledger, force: int):
+    """Keep only the passages that answer one of the approved outline's questions (passage_filter.json logs what was dropped)."""
+    from deckgen.research.relevance import PassageFilter, filter_passages
+
+    path = run_dir / "passage_filter.json"
+    if path.exists() and STAGES.index("spec") < force:
+        return PassageFilter.model_validate_json(path.read_text(encoding="utf-8"))
+    if ledger:
+        ledger.stage = "passage_filter"
+    pf = filter_passages(llm, outline, findings)
+    path.write_text(pf.model_dump_json(indent=1), encoding="utf-8")
+    print(f"passage filter: kept {sum(len(v) for v in pf.kept.values())}, dropped {len(pf.dropped)} passages ({len(pf.dropped_finding_ids)} findings dropped with them)")
+    if ledger:
+        ledger.stage_line("passage_filter")
+    return pf
+
+
 def _photo_catalog(llm, brief, outline, run_dir: Path, ledger, force: int):
     """Candidate photos per slide from Wikimedia Commons (cached in photos.json). A search failure means no photos, never a failed run."""
     from deckgen.research.photos import Catalog, find_for_outline
@@ -160,9 +177,10 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
     sheet = None if spec_reused else _facts_sheet(llm, findings, run_dir, ledger, force)
     facts_text = sheet.text() if sheet else ""
     data = None if spec_reused else DataSets(findings.findings, sheet)
+    pfilter = None if spec_reused else _passage_filter(llm, outline, findings, run_dir, ledger, force)
     photos = _photo_catalog(llm, brief, outline, run_dir, ledger, force) if CONFIG.photos and not spec_reused else None
     spec = stage("spec", run_dir / "deck_spec.json", DeckSpec,
-                 lambda: generate_spec(llm, brief, outline, findings, brand_dir, run_dir, photos=photos, facts_text=facts_text, data=data, sheet=sheet))
+                 lambda: generate_spec(llm, brief, outline, findings, brand_dir, run_dir, photos=photos, facts_text=facts_text, data=data, sheet=sheet, pfilter=pfilter))
 
     if photos is not None:  # per-photo status (searches, downloads, failures) is written after the spec stage has used the catalog
         (run_dir / "photos.json").write_text(photos.to_json(), encoding="utf-8")

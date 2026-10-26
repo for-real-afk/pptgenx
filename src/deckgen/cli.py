@@ -259,6 +259,92 @@ def repair(run: str = typer.Option(..., help="finished run id under runs/ (needs
     typer.echo(report_md(report))
 
 
+@app.command()
+def fixpass(run: str = typer.Option(..., help="finished run id under runs/"), out: str = typer.Option(None, help="new run id (default <run>-fixed)"),
+            instructions: Path = typer.Option(None, help="JSON {slide number: instruction | {text, rewrite}} applied as small diffs / rewrites"),
+            tier_overrides: str = typer.Option(None), budget: float = typer.Option(None, "--budget")) -> None:
+    """Targeted fix pass on a finished deck: passage relevance report, facts-sheet odd-one-out fixes, your per-slide instructions, a rebuilt sources
+    slide, ONE cross-slide LLM check, then QA, rebuild and report in a new run dir."""
+    import json
+    import shutil
+
+    from deckgen.ledger import BudgetAbort
+    from deckgen.llm import Tracer, make_llm
+    from deckgen.pipeline import Request, report_md, run_pipeline
+    from deckgen.research.datasets import DataSets
+    from deckgen.research.facts import Sheet, odd_ones
+    from deckgen.research.relevance import filter_passages
+    from deckgen.schemas import DeckSpec
+    from deckgen.schemas.research import Brief, Findings, Outline
+    from deckgen.spec.deck_checks import consistency
+    from deckgen.spec.repair import apply_instructions
+    from deckgen.spec.spec_generator import _small_fix, sources_slide
+    from deckgen.spec.validate_spec import load_manifest
+
+    src, dst = CONFIG.runs_dir / run, CONFIG.runs_dir / (out or f"{run}-fixed")
+    dst.mkdir(parents=True, exist_ok=True)
+    for name in ("brief.json", "findings.json", "outline.json", "facts.json", "usage.jsonl", "deck_notes.json"):
+        if (src / name).exists():
+            shutil.copy(src / name, dst / name)
+    brief = Brief.model_validate_json((dst / "brief.json").read_text(encoding="utf-8"))
+    outline = Outline.model_validate_json((dst / "outline.json").read_text(encoding="utf-8"))
+    findings = Findings.model_validate_json((dst / "findings.json").read_text(encoding="utf-8"))
+    sheet = Sheet.model_validate_json((dst / "facts.json").read_text(encoding="utf-8")) if (dst / "facts.json").exists() else None
+    spec = DeckSpec.model_validate_json((src / "deck_spec.final.json").read_text(encoding="utf-8"))
+    by_id = {f.id: f for f in findings.findings if not f.excluded}
+    brand_dir = CONFIG.brands_dir / brief.brand
+    ledger = make_ledger(dst, budget)
+    llm = make_llm(Tracer(dst / "trace.jsonl"), ledger)
+    notes_path = dst / "deck_notes.json"
+    notes = json.loads(notes_path.read_text(encoding="utf-8")) if notes_path.exists() else {}
+    log: dict = {}
+    try:
+        ledger.stage = "passage_filter"
+        pf = filter_passages(llm, outline, findings)
+        (dst / "passage_filter.json").write_text(pf.model_dump_json(indent=1), encoding="utf-8")
+        ledger.stage_line("passage_filter")
+        gone = set(pf.dropped_finding_ids)
+        log["passages"] = {"kept": sum(len(v) for v in pf.kept.values()), "dropped": len(pf.dropped), "findings_dropped": len(gone),
+                           "slides_citing_dropped_findings": {s.id: sorted(set(s.source_refs) & gone) for s in spec.slides if set(s.source_refs) & gone}}
+        slides = list(spec.slides)
+        manifest = load_manifest(brand_dir)
+        ledger.stage = "fix"
+        log["facts_odd_ones"] = []
+        if sheet is not None:
+            for o in odd_ones(slides, sheet):
+                e = sheet.entries[o["entry"]]
+                log["facts_odd_ones"].append(_small_fix(llm, slides, o["slide"], by_id, manifest, spec.title, spec.brand,
+                                                        f"this slide quotes '{o['found']}' for {e.subject} / {e.attribute}, but the facts sheet wording is: {e.value}",
+                                                        f"FACTS SHEET: {e.subject} / {e.attribute}: {e.value}. Use exactly this.", f"{e.subject} / {e.attribute}", "facts-sheet"))
+        ctx = {"by_id": by_id, "manifest": manifest, "findings": findings, "outline": outline, "brief": brief, "brand_dir": brand_dir,
+               "facts_text": sheet.text() if sheet else "", "data": DataSets(findings.findings, sheet), "deck_title": spec.title, "brand": spec.brand}
+        if instructions:
+            slides, log["instructions"] = apply_instructions(llm, slides, json.loads(instructions.read_text(encoding="utf-8")), ctx)
+        used = [by_id[r] for sl in slides[:-1] for r in sl.source_refs if r in by_id]
+        slides[-1] = sources_slide(len(slides), used)       # rebuilt: de-duplicated, no stray characters
+        ledger.stage_line("fix")
+        fixed = spec.model_copy(update={"slides": slides})
+        ledger.stage = "cross_check"
+        found = consistency(llm, fixed, by_id)
+        counts: dict[str, int] = {}
+        for p in found:
+            counts[p.kind] = counts.get(p.kind, 0) + 1
+        log["cross_check"] = {"found": counts, "contradictions_llm": counts.get("contradiction", 0)}
+        ledger.stage_line("cross_check")
+        notes.update({"unresolved": [p.model_dump() for p in found], "cross_check": log["cross_check"], "fixpass": log})
+        notes_path.write_text(json.dumps(notes, indent=1), encoding="utf-8")
+        (dst / "deck_spec.json").write_text(fixed.model_dump_json(exclude_none=True, indent=1), encoding="utf-8")
+        report = run_pipeline(Request(brief.topic, brief.audience, brief.slide_count, brief.brand, tier_overrides=tier_overrides), llm, make_tools(), dst,
+                              auto_approve=True, do_qa=True, ledger=ledger)
+    except BudgetAbort as e:
+        ledger.write_summary(dst / "usage_summary.md")
+        typer.echo(f"ABORTED BEFORE SPENDING OVER THE CAP: {e}")
+        raise typer.Exit(2)
+    ledger.write_summary(dst / "usage_summary.md")
+    typer.echo(json.dumps(log, indent=1, ensure_ascii=False)[:3000])
+    typer.echo(report_md(report))
+
+
 @app.command("eval")
 def eval_(golden: Path = typer.Option(Path("evals/golden_topics.json")), only: str = typer.Option(None, help="substring of topic"),
           runs: int = typer.Option(3, help="runs per topic (run 1 does the research)")) -> None:

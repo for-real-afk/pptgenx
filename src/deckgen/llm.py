@@ -29,7 +29,7 @@ PARSE_ATTEMPTS = {"fixer": 2, "facts_sheet": 2}   # one validation-error retry o
 MAX_TOKENS_CEILING = 16_000
 STAGE_ROLE = {
     "plan": "extractor", "outline": "writer", "spec_slide": "writer", "spec_fallback_labels": "writer", "fixer": "writer",
-    "research_query": "extractor", "research_extract": "extractor", "image_queries": "extractor", "facts_sheet": "checker", "spec_deck": "writer",
+    "research_query": "extractor", "research_extract": "extractor", "image_queries": "extractor", "facts_sheet": "checker", "spec_deck": "writer", "passage_filter": "extractor",
     "research_crosscheck": "checker", "research_conflict_pairs": "checker", "faithfulness": "checker", "deck_consistency": "checker",
     "critic": "critic", "critic_consistency": "critic",
 }

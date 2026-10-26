@@ -107,3 +107,32 @@ def repair_deck(llm: LLM, spec: DeckSpec, brief: Brief, outline: Outline, findin
 
 def write_log(path: Path, report: dict) -> None:
     path.write_text(json.dumps(report, indent=1, ensure_ascii=False), encoding="utf-8")
+
+
+# ---- targeted fix pass: user-directed per-slide instructions on a finished deck ------------------------------------------------------
+def apply_instructions(llm: LLM, slides: list[SlideSpec], instructions: dict, ctx: dict) -> tuple[list[SlideSpec], list[dict]]:
+    """instructions: {"3": "remove the tangent", "13": {"rewrite": true, "text": "..."}}. A string is a small diff (up to GROWTH extra words); a rewrite
+    re-writes the slide from its outline entry. Either is kept only if the slide is no worse on the hard gates."""
+    by_id, manifest, findings = ctx["by_id"], ctx["manifest"], ctx["findings"]
+    slides, log = list(slides), []
+    for key, ins in instructions.items():
+        n = int(key)
+        text, rewrite = (ins, False) if isinstance(ins, str) else (ins["text"], bool(ins.get("rewrite")))
+        s = slides[n - 1]
+        rec = {"slide": n, "instruction": text[:160], "mode": "rewrite" if rewrite else "diff", "result": "unchanged"}
+        src = slide_source_text(ctx["outline"].slides[n - 1], by_id, findings.passages) if n <= len(ctx["outline"].slides) else ""
+        try:
+            base = check_all(llm, s, by_id, slides[:n - 1], manifest, ctx["deck_title"], ctx["brand"], faith=False, source_text=src)
+            problem = Violation("deck_contradiction", f"instruction for this slide: {text}", "hard")
+            if rewrite:
+                cand = _rewrite(llm, s, n, slides, problem, by_id, manifest, ctx["brief"], ctx["outline"], ctx["brand_dir"], findings, ctx["facts_text"], ctx["data"])
+            else:
+                cand = apply_spec_edits(s, propose(llm, s, base + [problem], by_id, pool_listing(by_id, 40), src, ctx["facts_text"], allow_growth=GROWTH), by_id, allow_growth=GROWTH)
+            after = check_all(llm, cand, by_id, slides[:n - 1], manifest, ctx["deck_title"], ctx["brand"], faith=False, source_text=src) if cand is not None else base
+            if cand is not None and cand != s and score(after) <= score(base):
+                slides[n - 1] = cand
+                rec["result"] = "edited"
+        except Exception as e:  # noqa: BLE001 - a failed instruction keeps the slide; the result says so
+            rec["result"] = f"rejected: {str(e)[:120]}"
+        log.append(rec)
+    return slides, log

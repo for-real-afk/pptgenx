@@ -12,7 +12,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from deckgen.llm import LLM
 from deckgen.research.weigh import weight
+from deckgen.schemas import SlideSpec
 from deckgen.schemas.research import Finding
+from deckgen.spec.claims import visible_fields
 
 NL = chr(10)
 MAX_GROUPS = 30
@@ -127,3 +129,28 @@ def build_sheet(llm: LLM, findings: list[Finding]) -> Sheet:
     entries = [e for g in merge_groups(groups.groups[:MAX_GROUPS]) if (e := decide(g, by_id))]
     single = [f"{f.id} ({domain(f.source_url)})" for f in usable if f.needs_review][:MAX_SINGLE]
     return Sheet(entries=entries, single_source=single)
+
+
+# ---- post-write check: a slide quoting a different value for a sheet entry (exact match only, so a miss is possible but a false alarm is not) ----
+def odd_ones(slides: list[SlideSpec], sheet: Sheet) -> list[dict]:
+    """Slides whose text, in one fragment that names the entry's subject and attribute, quotes one of the entry's OTHER candidate values verbatim
+    instead of the sheet's wording. For a 'sources differ' entry, quoting a single version without saying the sources differ counts too."""
+    out: list[dict] = []
+    for ei, e in enumerate(sheet.entries):
+        subj, attr = _toks(e.subject), _toks(e.attribute)
+        if not subj or not attr:
+            continue
+        for n, s in enumerate(slides, 1):
+            if s.layout in ("TITLE", "SOURCES"):
+                continue
+            for _, text in visible_fields(s):
+                toks, flat = _toks(text), _norm(text)
+                if not subj <= toks or len(attr & toks) / len(attr) < 0.5:
+                    continue
+                hits = [v for v in e.values if len(v) >= 4 and _norm(v) in flat]
+                odd = [v for v in hits if _norm(v) != _norm(e.value)] if e.status == "resolved" else hits
+                if odd and (e.status == "differ" and "differ" not in flat or e.status == "resolved" and _norm(e.value) not in flat):
+                    out.append({"slide": n, "entry": ei, "found": odd[0]})
+                    break
+    seen: set[tuple[int, int]] = set()
+    return [o for o in out if (o["slide"], o["entry"]) not in seen and not seen.add((o["slide"], o["entry"]))]

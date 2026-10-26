@@ -163,3 +163,45 @@ def test_cut_off_answer_retries_with_more_room_and_fixer_retries_once(tmp_path):
         raise AssertionError("expected a failure after one retry")
     except ValueError as e:
         assert "after 2 attempts" in str(e) and len(a2.calls) == 2                            # fixer: one validation-error retry only
+
+
+def test_generate_spec_hands_the_whole_deck_drafts_to_the_slide_checks(monkeypatch, tmp_path):
+    """Regression: the first versions from the whole-deck call must reach build_slide (they were silently dropped once)."""
+    from deckgen.spec import deck_writer, spec_generator
+
+    spec, outline, brief, findings = _deck()
+    marker = slide(id="s02", title="Written by the whole-deck call")
+    monkeypatch.setattr(deck_writer, "write_deck", lambda *a, **k: {2: marker})
+    seen = {}
+
+    def fake_build(llm, brief, o, outline, pool, brand_dir, prev, is_last, notes=None, cache=None, **kw):
+        seen[o.n] = kw.get("first")
+        return slide(id=f"s{o.n:02d}")
+
+    monkeypatch.setattr(spec_generator, "build_slide", fake_build)
+    monkeypatch.setattr(spec_generator, "_repair_deck", lambda llm, b, o, by_id, bd, slides, run_dir, extra=None, sheet=None: slides)
+    spec_generator.generate_spec(FakeLLM({}), brief, outline, findings, Path("brand/default_v1"), None)
+    assert seen[2] is marker and seen[3] is None
+
+
+def test_passage_filter_keeps_answering_passages_and_drops_findings_from_dropped_ones():
+    from deckgen.research.relevance import filter_passages
+
+    spec, outline, brief, _ = _deck()
+    ps = {"https://a.test/x": ["Audi won the 1982 manufacturers title with the Quattro rally car after a long season.", "Cookie settings and navigation links for the site."]}
+    fs = [f(1, "Audi won the 1982 manufacturers title with the Quattro", "https://a.test/x"), f(2, "Cookie settings and navigation links for the site", "https://a.test/x")]
+    llm = FakeLLM({"passage_filter": {"keep": [{"i": 0, "slides": [2]}, {"i": 1, "slides": []}]}})
+    pf = filter_passages(llm, outline, Findings(findings=fs, passages=ps))
+    assert pf.kept == {"https://a.test/x": [ps["https://a.test/x"][0]]} and len(pf.dropped) == 1 and pf.dropped_finding_ids == ["f02"]
+
+
+def test_odd_one_out_needs_an_exact_quote_of_another_value():
+    from deckgen.research.facts import Entry, Sheet, odd_ones
+
+    sheet = Sheet(entries=[Entry(subject="Audi", attribute="withdrawal timing", status="resolved", value="after Corsica 1986", tier=4, source="wrc.com",
+                                 values=["after Corsica 1986", "after Portugal 1985"], ids=["f01", "f02"])])
+    ok = slide(id="s02", title="Audi withdrawal timing: after Corsica 1986", composition=None, placeholders={"body": ["Audi withdrawal timing: after Corsica 1986"]})
+    odd = slide(id="s03", title="Audi withdrawal timing: after Portugal 1985", composition=None, placeholders={"body": ["Audi withdrawal timing: after Portugal 1985"]})
+    other = slide(id="s04", title="Peugeot left after Portugal 1985", composition=None, placeholders={"body": ["Peugeot left after Portugal 1985"]})   # other subject: no false alarm
+    got = odd_ones([ok, odd, other], sheet)
+    assert [g["slide"] for g in got] == [2] and got[0]["found"] == "after Portugal 1985"
