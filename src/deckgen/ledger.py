@@ -74,6 +74,9 @@ class Ledger:
         self.stage = "setup"
         self._warned: set[float] = set()
         self.aborted = ""
+        if path and path.exists():  # a resumed run id keeps counting against the same cap
+            self.rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.total = sum(r["cost_usd"] for r in self.rows)
 
     # -- pricing ---------------------------------------------------------------------------------------------------
     def cost(self, model: str, tin: int, tout: int, cw: int = 0, cr: int = 0) -> float:

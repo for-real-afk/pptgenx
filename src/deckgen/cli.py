@@ -162,6 +162,7 @@ def generate(
     auto_approve: bool = typer.Option(False, help="skip the outline approval prompt"),
     qa_loop: bool = typer.Option(True, "--qa/--no-qa"),
     no_cache: bool = typer.Option(False, "--no-cache", help="ignore and do not write the LLM response cache"),
+    tier_overrides: str = typer.Option(None, help="per-topic source tier overrides, e.g. wrc-group-b (config/tier_overrides/<name>.json)"),
     budget: float = typer.Option(None, "--budget", help="hard USD cap for the whole run (default: config budget_usd). Enables the cost ledger."),
 ) -> None:
     """Topic -> researched, sourced, QA'd .pptx under runs/<run_id>/."""
@@ -184,7 +185,7 @@ def generate(
     from deckgen.ledger import BudgetAbort
 
     try:
-        report = run_pipeline(Request(topic, audience, slides, brand), llm, make_tools(), run_dir,
+        report = run_pipeline(Request(topic, audience, slides, brand, tier_overrides=tier_overrides), llm, make_tools(), run_dir,
                               auto_approve=auto_approve, from_stage=from_stage, do_qa=qa_loop, ledger=ledger)
     except BudgetAbort as e:
         ledger.write_summary(run_dir / "usage_summary.md")

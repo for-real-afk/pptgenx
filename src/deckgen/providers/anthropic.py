@@ -27,8 +27,10 @@ class Adapter:
             content.append({"type": "text", "text": cache_prefix, "cache_control": {"type": "ephemeral"}})
         content.append({"type": "text", "text": prompt})
         sys_blocks = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
-        body = {"model": model, "max_tokens": max_tokens, "temperature": temperature, "system": sys_blocks,
-                "messages": [{"role": "user", "content": content}]}  # seed is not supported by this API: ignored
+        body = {"model": model, "max_tokens": max_tokens, "system": sys_blocks,
+                "messages": [{"role": "user", "content": content}]}
+        if "sonnet" in model:  # Sonnet thinks by default and the hidden tokens eat max_tokens (empty text); Haiku rejects the field
+            body["thinking"] = {"type": "between_tools"}  # seed and temperature are not accepted by the current models (400 'temperature is deprecated'): both ignored
         try:
             r = httpx.post(f"{BASE}/v1/messages", headers=self._headers(), json=body, timeout=180)
         except httpx.HTTPError as e:
@@ -38,9 +40,12 @@ class Adapter:
             raise RateLimited(float(h.get("retry-after", 10) or 10), daily=False, message=r.text[:200])
         if r.status_code >= 500:
             raise ProviderUnavailable(f"{r.status_code} {r.text[:150]}")
-        r.raise_for_status()
+        if r.status_code >= 400:
+            raise RuntimeError(f"Anthropic API {r.status_code}: {r.text[:400]}")
         j = r.json()
         text = "".join(b.get("text", "") for b in j.get("content", []) if b.get("type") == "text")
+        if not text.strip():  # say why: a response with no text block must not look like an empty-JSON parse error
+            raise ProviderUnavailable(f"empty response: stop_reason={j.get('stop_reason')} blocks={[b.get('type') for b in j.get('content', [])]} out={j.get('usage', {}).get('output_tokens')}")
         u = j.get("usage", {})
         rem = h.get("anthropic-ratelimit-tokens-remaining")
         return RawResult(text=text, tokens_in=u.get("input_tokens", 0), tokens_out=u.get("output_tokens", 0), model=j.get("model", model),
