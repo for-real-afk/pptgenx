@@ -27,12 +27,12 @@ class SpecEdits(BaseModel):
 
 
 def check_all(llm: LLM, s: SlideSpec, findings: dict[str, Finding], prev: list[SlideSpec], manifest: dict, deck_title: str, brand: str,
-              faith: bool = True) -> list[Violation]:
+              faith: bool = True, source_text: str = "") -> list[Violation]:
     """Deterministic rules and manifest limits first; the LLM fact-check only when those pass (cheap before expensive)."""
-    vs = check_slide_v(s, findings, prev)
+    vs = check_slide_v(s, findings, prev, source_text)
     vs += validate_violations(DeckSpec(title=deck_title, brand=brand, slides=[s]), manifest)
     if faith and CONFIG.faithfulness_check and not hard(vs) and s.layout not in NO_FAITH:
-        vs += check_slide_text(llm, s, [findings[r] for r in s.source_refs if r in findings])
+        vs += check_slide_text(llm, s, [findings[r] for r in s.source_refs if r in findings], source_text)
     return vs
 
 
@@ -41,7 +41,7 @@ def score(vs: list[Violation]) -> tuple[int, int]:
     return sum(x.is_hard_correctness for x in vs), len(hard(vs))
 
 
-def propose(llm: LLM, s: SlideSpec, vs: list[Violation], findings: dict[str, Finding], pool_hint: str = "") -> SpecEdits:
+def propose(llm: LLM, s: SlideSpec, vs: list[Violation], findings: dict[str, Finding], pool_hint: str = "", source_text: str = "") -> SpecEdits:
     cited = "\n".join(f"{r}: {findings[r].claim}" for r in s.source_refs if r in findings)
     issues = "\n".join(f"- [{x.check}] {x.message}" for x in hard(vs)[:10])
     prompt = (
@@ -51,6 +51,7 @@ def propose(llm: LLM, s: SlideSpec, vs: list[Violation], findings: dict[str, Fin
         "/title, /placeholders/body/1, /composition/items/2/body.\n"
         f"SLIDE:\n{s.model_dump_json(exclude_none=True)}\n\nVIOLATIONS:\n{issues}\n\nCITED FINDINGS:\n{cited}\n"
         + (f"\nOTHER AVAILABLE FINDINGS (for `cite` or for exact wording):\n{pool_hint}\n" if pool_hint else "")
+        + (f"{chr(10)}SOURCE PASSAGES you may take exact wording from:{chr(10)}{source_text}{chr(10)}" if source_text else "")
     )
     return llm.generate(stage="fixer", system=SYSTEM, prompt=prompt, schema=SpecEdits)
 
@@ -64,7 +65,7 @@ def apply(s: SlideSpec, e: SpecEdits, findings: dict[str, Finding]) -> SlideSpec
 
 
 def edit_loop(llm: LLM, s: SlideSpec, vs: list[Violation], findings: dict[str, Finding], prev: list[SlideSpec], manifest: dict,
-              deck_title: str, brand: str, pool_hint: str = "", rounds: int | None = None) -> tuple[SlideSpec, list[Violation], int, list[str]]:
+              deck_title: str, brand: str, pool_hint: str = "", rounds: int | None = None, source_text: str = "") -> tuple[SlideSpec, list[Violation], int, list[str]]:
     """Returns (best slide, its violations, rounds used, notes about rejected edits)."""
     notes: list[str] = []
     best, best_vs, used = s, vs, 0
@@ -73,14 +74,14 @@ def edit_loop(llm: LLM, s: SlideSpec, vs: list[Violation], findings: dict[str, F
             break
         used += 1
         try:
-            cand = apply(best, propose(llm, best, best_vs, findings, pool_hint), findings)
+            cand = apply(best, propose(llm, best, best_vs, findings, pool_hint, source_text), findings)
         except (EditRejected, ValueError) as ex:
             notes.append(f"edit rejected: {str(ex)[:100]}")
             continue
         if cand == best:
             notes.append("fixer proposed no change")
             continue
-        cand_vs = check_all(llm, cand, findings, prev, manifest, deck_title, brand)
+        cand_vs = check_all(llm, cand, findings, prev, manifest, deck_title, brand, source_text=source_text)
         if score(cand_vs) < score(best_vs) or (score(cand_vs) == score(best_vs) and len(cand_vs) < len(best_vs)):
             best, best_vs = cand, cand_vs
         else:

@@ -12,7 +12,7 @@ load_dotenv(ROOT / ".env")
 
 DEFAULT_MODEL = {"gemini": "gemini-3.5-flash", "groq": "openai/gpt-oss-120b", "anthropic": "claude-sonnet-5-5"}
 ROLE_TEMPERATURE = {"extractor": 0.1, "writer": 0.2, "checker": 0.0, "critic": 0.0}  # low and fixed for reproducibility
-ROLE_MAX_TOKENS = {"extractor": 2000, "writer": 3000, "checker": 1500, "critic": 1500}  # a runaway response cannot burn the budget
+ROLE_MAX_TOKENS = {"extractor": 2000, "writer": 3000, "checker": 3000, "critic": 1500}  # a runaway response cannot burn the budget
 
 
 def _int(name: str, default: int) -> int:

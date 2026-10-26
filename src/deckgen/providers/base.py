@@ -17,6 +17,7 @@ class RawResult:
     # rate-limit state the provider reported, normalised: remaining tokens and seconds until reset (None = unknown)
     cache_write_tokens: int = 0  # provider prompt cache: tokens written to / read from the cache (billed at their own prices)
     cache_read_tokens: int = 0
+    stop_reason: str = ""  # "max_tokens" = the answer was cut off
     remaining_tokens: int | None = None
     reset_seconds: float | None = None
     raw_headers: dict = field(default_factory=dict)

@@ -53,7 +53,7 @@ def _check_costs() -> list[bool]:
 
 
 @app.command()
-def estimate(slides: int = typer.Option(14), limit: float = typer.Option(20.0, help="ask before spending if the UPPER estimate exceeds this")) -> None:
+def estimate(slides: int = typer.Option(14), limit: float = typer.Option(10.0, help="ask before spending if the UPPER estimate exceeds this")) -> None:
     """Dry cost estimate from prices.yaml and the configured roles. Spends nothing."""
     from deckgen.estimate import estimate as est, table
     from deckgen.ledger import Prices

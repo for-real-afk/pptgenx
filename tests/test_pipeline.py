@@ -163,9 +163,16 @@ def test_unsupported_statement_is_fixed_by_a_targeted_diff_not_a_rewrite():
 
     findings = {f"f0{i}": Finding(id=f"f0{i}", question="q", claim=FACT, evidence_snippet="200 cars 450 480 500 hp", source_type="official",
                                   source_url=f"https://site{i}.test/x", retrieved_at="2026-01-01T00:00:00+00:00", confidence="high") for i in (1, 2)}
-    verdicts = iter([{"unsupported": ["Audi won in 1983"], "vague": []}, {"unsupported": [], "vague": []}])
+    verdicts = iter([{"issues": [{"claim_quote": "Audi won in 1983", "kind": "unsupported"}]}, {"issues": []}])
     sc = script()
     sc["faithfulness"] = lambda prompt, images: next(verdicts)
+
+    def wrong_year(prompt, images):  # item 0 states a year no source passage or finding contains: code can confirm the checker's quote
+        d = slide_draft(prompt, images)
+        d.items[0].body = "Audi won in 1983 with 200 cars."
+        return d
+
+    sc["spec_slide"] = wrong_year
     sc["fixer"] = {"edits": [{"action": "replace", "path": "/composition/items/0/body", "text": "Rule 0: builders needed 200 road cars."}], "cite": []}
     llm = FakeLLM(sc)
     brief = Brief(topic="t", audience="a", slide_count=6)

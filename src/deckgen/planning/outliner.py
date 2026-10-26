@@ -104,7 +104,8 @@ def outline(llm: LLM, brief: Brief, findings: Findings, retries: int = 3) -> Out
         "CHART_COMMENTARY slide only where findings hold comparable numbers. Each content slide needs 2-4 findings that no other slide relies on "
         "(two slides may share at most one finding); never split one point over two slides. The closing slide must add "
         "something forward-looking (implications, what to watch, next steps) and must not recap earlier slides; its findings "
-        "may repeat earlier ones. Avoid findings marked SINGLE-SOURCE STRONG CLAIM unless nothing else covers the point."
+        "may repeat earlier ones. Avoid findings marked SINGLE-SOURCE STRONG CLAIM unless nothing else covers the point. "
+        "Order the slides so that every event or decision is explained on an earlier slide before a later slide refers to it, and make each key_message name a specific subject (a person, car, event, number or date), never a generic label."
     )
     hints = detect_shapes([f for f in findings.findings if not f.excluded])
     if hints:

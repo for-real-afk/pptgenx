@@ -30,6 +30,11 @@ LAYOUT_CHOICE = (
     "headline numbers, a two-column comparison for two sides, cards or icon rows otherwise. TITLE_ONLY, CHART_COMMENTARY and TABLE are "
     "all allowed on content slides; slide 1 stays TITLE and the last slide stays CLOSING. Vary layouts across the deck.")
 
+TITLES = (
+    " TITLES AND COHERENCE: every slide title must carry a specific claim or subject (a name, event, number or date); never reuse a generic label "
+    "such as 'The peak' or 'The rise' across slides. Do not refer to an event ('the accident', 'the ban') unless an earlier slide explains it or "
+    "this slide states it with its source. The closing slide must not refer to events no earlier slide explains.")
+
 HEDGING = (
     " HEDGING: findings tagged CONTESTED (sources disagree) or REVIEW (one weak source) are not plain fact. Write them with hedged "
     "wording: 'approximately', 'reportedly', 'according to <source>' or 'sources differ (X vs Y)', never as an unqualified statement, "
@@ -38,7 +43,7 @@ HEDGING = (
 
 def stable_prefix(style: str, menu: str, limits: str) -> str:
     return (f"STYLE GUIDE:{NL}{style}{NL}{NL}LAYOUTS:{NL}{menu}{NL}{NL}FIELD LIMITS:{NL}{limits}{NL}{NL}"
-            + HOW_TO_FILL + (LAYOUT_CHOICE if CONFIG.writer_chooses_layout else "") + HEDGING + NL + NL)
+            + HOW_TO_FILL + (LAYOUT_CHOICE if CONFIG.writer_chooses_layout else "") + TITLES + HEDGING + NL + NL)
 
 
 def select_source_text(passages: dict[str, list[str]], urls: list[str], query: str, k: int = 6, max_chars: int = 7000) -> str:

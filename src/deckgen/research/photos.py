@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import html
 import io
+import os
 import re
 from pathlib import Path
 
@@ -15,7 +16,12 @@ from deckgen.llm import LLM
 
 NL = chr(10)
 API = "https://commons.wikimedia.org/w/api.php"
-UA = {"User-Agent": "deckgen/0.1 (research-to-pptx proof of concept; local user)"}
+
+
+def user_agent() -> dict | None:
+    """Wikimedia requires a descriptive User-Agent with a real contact. The contact comes only from DECKGEN_CONTACT; unset = no photos."""
+    contact = os.environ.get("DECKGEN_CONTACT", "").strip()
+    return {"User-Agent": f"deckgen/0.1 ({contact}) python-requests"} if contact else None
 OK_LICENSE = re.compile(r"^(CC[ -]BY(?![ -]N)|CC0|Public domain|PD)", re.I)
 MIN_WIDTH = 900
 PER_QUERY = 6
@@ -49,8 +55,8 @@ def _plain(s: str) -> str:
     return html.unescape(re.sub(r"<[^>]+>", "", s or "")).strip()
 
 
-def search_commons(query: str, limit: int = PER_QUERY, get=httpx.get) -> list[dict]:
-    r = get(API, headers=UA, timeout=30, params={
+def search_commons(query: str, limit: int = PER_QUERY, get=httpx.get, headers: dict | None = None) -> list[dict]:
+    r = get(API, headers=headers or user_agent(), timeout=30, params={
         "action": "query", "format": "json", "generator": "search", "gsrsearch": f"{query} filetype:bitmap", "gsrnamespace": 6, "gsrlimit": limit,
         "prop": "imageinfo", "iiprop": "url|size|mime|extmetadata", "iiurlwidth": 1600})
     r.raise_for_status()
@@ -65,12 +71,15 @@ def to_candidate(page: dict, cid: str, slide: int) -> Candidate | None:
     lic = _plain(md.get("LicenseShortName", {}).get("value", ""))
     if not OK_LICENSE.match(lic) or _plain(md.get("Restrictions", {}).get("value", "")):
         return None
+    author = _plain(md.get("Artist", {}).get("value", ""))[:50]
+    if not author or author.lower() == "unknown":
+        return None  # attribution is part of the licence: no readable author, no photo
     title = re.sub(r"\.\w+$", "", page["title"].removeprefix("File:")).replace("_", " ")
     return Candidate(id=cid, title=title, desc=_plain(md.get("ImageDescription", {}).get("value", ""))[:160], url=info.get("thumburl") or info["url"],
-                     license=lic, author=_plain(md.get("Artist", {}).get("value", ""))[:50] or "unknown", page=info.get("descriptionurl", ""), for_slide=slide)
+                     license=lic, author=author, page=info.get("descriptionurl", ""), for_slide=slide)
 
 
-def find_for_outline(llm: LLM, brief, outline, get=httpx.get) -> dict[int, list[Candidate]]:
+def find_for_outline(llm: LLM, brief, outline, get=httpx.get, log: list | None = None) -> dict[int, list[Candidate]]:
     """One cheap call writes 1-2 short queries per content slide; Commons does the search. Candidate ids are unique across the deck."""
     slides = [o for o in outline.slides if o.layout_hint not in ("TITLE", "CLOSING", "SECTION", "SOURCES")]
     listing_ = NL.join(f"{o.n}. {o.key_message} ({o.section})" for o in slides)
@@ -84,8 +93,15 @@ def find_for_outline(llm: LLM, brief, outline, get=httpx.get) -> dict[int, list[
         for query in q.queries[:2]:
             try:
                 pages = search_commons(query, get=get)
-            except httpx.HTTPError:
+            except httpx.HTTPError as e:  # loud: console now, photos.json and the run report later
+                code = getattr(getattr(e, "response", None), "status_code", None)
+                msg = f"photos: Commons search '{query}' failed ({code or type(e).__name__})"
+                print(msg)
+                if log is not None:
+                    log.append({"query": query, "ok": False, "error": msg})
                 continue
+            if log is not None:
+                log.append({"query": query, "ok": True, "results": len(pages)})
             for pg in pages:
                 if pg.get("title") in seen:
                     continue
@@ -112,7 +128,7 @@ def fetch(c: Candidate, dest_dir: Path, get=httpx.get) -> Path:
     dest = dest_dir / f"{c.id}.jpg"
     if dest.exists():
         return dest
-    r = get(c.url, headers=UA, timeout=60, follow_redirects=True)
+    r = get(c.url, headers=user_agent(), timeout=60, follow_redirects=True)
     r.raise_for_status()
     im = Image.open(io.BytesIO(r.content)).convert("RGB")
     want = PHOTO_BOX[0] / PHOTO_BOX[1]
@@ -131,8 +147,8 @@ def fetch(c: Candidate, dest_dir: Path, get=httpx.get) -> Path:
 class Catalog:
     """Candidate photos per outline slide; a photo is used at most once per deck."""
 
-    def __init__(self, cands: dict[int, list[Candidate]], dest_dir: Path):
-        self.cands, self.dest_dir, self.used = cands, dest_dir, set()
+    def __init__(self, cands: dict[int, list[Candidate]], dest_dir: Path, log: list | None = None):
+        self.cands, self.dest_dir, self.used, self.log = cands, dest_dir, set(), log if log is not None else []
 
     def offered(self, n: int) -> list[Candidate]:
         return [c for c in self.cands.get(n, []) if c.id not in self.used]
@@ -144,16 +160,25 @@ class Catalog:
         c = next((c for c in self.offered(n) if c.id == cid), None)
         if c is None:
             return None
+        try:
+            path = str(fetch(c, self.dest_dir, get))
+        except Exception as e:  # noqa: BLE001 - reported, never swallowed; the slide simply gets another layout
+            msg = f"photos: download of {c.id} ({c.title}) failed ({type(e).__name__}: {str(e)[:80]})"
+            print(msg)
+            self.log.append({"photo": c.id, "ok": False, "error": msg})
+            return None
         self.used.add(c.id)
-        return Photo(path=str(fetch(c, self.dest_dir, get)), alt=c.title[:120], credit=credit(c)), c
+        self.log.append({"photo": c.id, "ok": True, "title": c.title, "credit": credit(c), "page": c.page})
+        return Photo(path=path, alt=c.title[:120], credit=credit(c)), c
 
     def to_json(self) -> str:
         import json
 
-        return json.dumps({str(n): [c.model_dump() for c in cs] for n, cs in self.cands.items()}, indent=1)
+        return json.dumps({"log": self.log, "candidates": {str(n): [c.model_dump() for c in cs] for n, cs in self.cands.items()}}, indent=1)
 
     @classmethod
     def from_json(cls, text: str, dest_dir: Path) -> "Catalog":
         import json
 
-        return cls({int(n): [Candidate(**c) for c in cs] for n, cs in json.loads(text).items()}, dest_dir)
+        d = json.loads(text)
+        return cls({int(n): [Candidate(**c) for c in cs] for n, cs in d.get("candidates", {}).items()}, dest_dir, d.get("log", []))

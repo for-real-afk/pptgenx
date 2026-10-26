@@ -280,6 +280,8 @@ class RoleLLM:
                 outcome = "ok"
             except (ValidationError, ValueError) as e:
                 last_err, out, outcome = e, None, "schema_fail"
+            if raw.stop_reason == "max_tokens":  # a cut-off answer is a failed call even if it happens to parse; it is billed and logged as such
+                last_err, out, outcome = ValueError(f"response was cut off at max_tokens={spec.max_tokens}; answer more briefly"), None, "truncated"
             if self.ledger:  # the API's own token counts, priced from prices.yaml
                 self.ledger.record(role=role, llm_stage=stage, model=model, tin=raw.tokens_in, tout=raw.tokens_out, cw=raw.cache_write_tokens,
                                    cr=raw.cache_read_tokens, latency_s=time.time() - t0, cache="miss", retry=attempt, outcome=outcome)

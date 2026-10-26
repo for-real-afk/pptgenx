@@ -9,6 +9,7 @@ The Sources slide, title slide and captions are built in code. Shortfalls are re
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -114,6 +115,14 @@ def sources_slide(n: int, used: list[Finding]) -> SlideSpec:
                      speaker_notes="Sources actually used in this deck. Retrieval dates are in findings.json.")
 
 
+def slide_source_text(o: OutlineSlide, pool: dict[str, Finding], passages: dict | None) -> str:
+    """Verbatim passages from the pages behind the slide's findings: shown to the writer, the fact-checker and the fixer alike."""
+    if not CONFIG.writer_source_text:
+        return ""
+    urls = sorted({pool[i].source_url for i in o.finding_ids if i in pool})
+    return select_source_text(passages or {}, urls, f"{o.key_message} {o.purpose}")
+
+
 def write_slide(llm: LLM, brief: Brief, o: OutlineSlide, outline: Outline, pool: dict[str, Finding], brand_dir: Path,
                 prev: list[SlideSpec], is_last: bool, feedback: list[str] | None = None, passages: dict | None = None,
                 photos=None) -> SlideSpec:
@@ -121,7 +130,7 @@ def write_slide(llm: LLM, brief: Brief, o: OutlineSlide, outline: Outline, pool:
     The stable prefix (style, layouts, limits, rules) is identical for every slide and is cached; the rest varies per slide."""
     style = (brand_dir / "style_guide.md").read_text(encoding="utf-8")
     preferred = [pool[i] for i in o.finding_ids if i in pool]
-    source_text = select_source_text(passages or {}, sorted({f.source_url for f in preferred}), f"{o.key_message} {o.purpose}") if CONFIG.writer_source_text else ""
+    source_text = slide_source_text(o, pool, passages)
     prefix = stable_prefix(style, _layout_menu(brand_dir), _limits_menu())
     offered = photos.offered(o.n) if photos is not None and CONFIG.photos else []
     photo_text = photo_listing(offered)
@@ -160,9 +169,21 @@ def build_slide(llm: LLM, brief: Brief, o: OutlineSlide, outline: Outline, pool:
         return SlideSpec.model_validate_json(cache.read_text(encoding="utf-8"))
     manifest = load_manifest(brand_dir)
     tr = getattr(llm, "tracer", None)
+    src = slide_source_text(o, pool, passages)  # the checker and the fixer see exactly what the writer saw
     s = write_slide(llm, brief, o, outline, pool, brand_dir, prev, is_last, passages=passages, photos=photos)
-    vs = check_all(llm, s, pool, prev, manifest, outline.deck_title, brief.brand)
-    s, vs, rounds, rejected = edit_loop(llm, s, vs, pool, prev, manifest, outline.deck_title, brief.brand, pool_listing(pool, 40))
+    vs = check_all(llm, s, pool, prev, manifest, outline.deck_title, brief.brand, source_text=src)
+    s, vs, rounds, rejected = edit_loop(llm, s, vs, pool, prev, manifest, outline.deck_title, brief.brand, pool_listing(pool, 40), source_text=src)
+    if score(vs)[0] > 0:  # a confirmed correctness failure survived the repairs: one rewrite with the quoted issues, then one repair round
+        issues = [x.message for x in hard(vs)][:6]
+        try:
+            s2 = write_slide(llm, brief, o, outline, pool, brand_dir, prev, is_last, issues, passages=passages, photos=photos)
+            vs2 = check_all(llm, s2, pool, prev, manifest, outline.deck_title, brief.brand, source_text=src)
+            s2, vs2, r2, rej2 = edit_loop(llm, s2, vs2, pool, prev, manifest, outline.deck_title, brief.brand, pool_listing(pool, 40), rounds=1, source_text=src)
+            rounds, rejected = rounds + 1 + r2, rejected + rej2
+            if score(vs2) < score(vs):
+                s, vs = s2, vs2
+        except (SpecGenerationError, ValueError):
+            pass  # the rewrite is a bonus; the best version so far stands
     if rejected:
         _record(notes, "fix_notes", [{"outline_slide": o.n, "note": r} for r in rejected])
     if not hard(vs):
@@ -316,6 +337,16 @@ def richness(s: SlideSpec, by_id: dict[str, Finding]) -> float:
     return weight + 3 * concrete
 
 
+def _words_of(s: SlideSpec) -> set[str]:
+    return {w for _, t in visible_fields(s) for w in re.findall(r"[a-z0-9]{3,}", t.lower())}
+
+
+def _near_duplicates(slides: list[SlideSpec], threshold: float = 0.7) -> bool:
+    """True when two slides say almost the same thing: word-set Jaccard of their visible text at or above the threshold."""
+    ws = [_words_of(x) for x in slides]
+    return any(len(ws[i] & ws[j]) / max(len(ws[i] | ws[j]), 1) >= threshold for i in range(len(ws)) for j in range(i + 1, len(ws)))
+
+
 def _repair_deck(llm: LLM, brief: Brief, outline: Outline, by_id: dict[str, Finding], brand_dir: Path,
                  slides: list[SlideSpec], run_dir: Path | None, extra: dict | None = None) -> list[SlideSpec]:
     """One repair pass. Redundancy: KEEP THE RICHER of the two slides and delete the other (never title, closing or sources; never below
@@ -325,6 +356,8 @@ def _repair_deck(llm: LLM, brief: Brief, outline: Outline, by_id: dict[str, Find
     last = len(slides)
     drop: dict[int, str] = {}
     for p in sorted((p for p in problems if p.kind == "redundancy"), key=lambda p: max(p.slides)):
+        if any(n in drop for n in p.slides) or not _near_duplicates([slides[n - 1] for n in p.slides if 0 < n <= len(slides)]):
+            continue  # overlap between slides is a warning (it stays in `unresolved`); only a near-exact duplicate costs a slide
         cands = [n for n in p.slides if 1 < n < last and n not in drop and slides[n - 1].layout not in PROTECTED]
         if not cands or len(slides) - len(drop) - 1 < CONFIG.slide_floor:
             continue

@@ -169,12 +169,13 @@ def test_redundant_slides_are_deleted_not_rewritten(tmp_path):
 
     vocab = "amber basil cedar delta ember fjord glint haven ivory jaded kappa lunar mango noble ocean pearl quartz raven sable tulip umber vivid wheat xenon yarrow zephyr".split()
 
-    def mk(i, refs):
-        items = [{"icon": "FaBook", "heading": f"Head {k}", "body": f"{vocab[(i * 4 + k) % 26]} {vocab[(i * 4 + k + 7) % 26]} {vocab[(i * 4 + k + 13) % 26]} {vocab[(i * 4 + k + 19) % 26]} 1982"} for k in range(3)]
+    def mk(i, refs, w=None):
+        w = i if w is None else w  # w: take the wording of another slide (a near-exact duplicate)
+        items = [{"icon": "FaBook", "heading": f"Head {k}", "body": f"{vocab[(w * 4 + k) % 26]} {vocab[(w * 4 + k + 7) % 26]} {vocab[(w * 4 + k + 13) % 26]} {vocab[(w * 4 + k + 19) % 26]} 1982"} for k in range(3)]
         return slide(id=f"s{i:02d}", source_refs=refs, title=f"Distinct message number {i} here", composition={"kind": "icon_rows", "items": items})
 
     slides = [slide(id="s01", layout="TITLE", title="T", composition=None, source_refs=[])] + \
-             [mk(i, r) for i, r in zip(range(2, 8), (["f01", "f02"], ["f01", "f02"], ["f03"], ["f04"], ["f05"], ["f06"]))] + \
+             [mk(i, r, 2 if i == 3 else None) for i, r in zip(range(2, 8), (["f01", "f02"], ["f01", "f02"], ["f03"], ["f04"], ["f05"], ["f06"]))] + \
              [slide(id="s08", layout="CLOSING", title="Next", composition=None, placeholders={"body": ["Watch the rules"]}, source_refs=["f01"])]
     outline = Outline(arc="timeline", deck_title="D", slides=[OutlineSlide(n=i, section="S", purpose="p", key_message="k") for i in range(1, 9)])
     llm = FakeLLM({"deck_consistency": {"problems": []}})
@@ -184,6 +185,31 @@ def test_redundant_slides_are_deleted_not_rewritten(tmp_path):
     notes = __import__("json").loads((tmp_path / "deck_notes.json").read_text())
     assert notes["deleted_slides"] == [3]                      # the later of the two slides sharing f01+f02
     assert out[-1].layout == "CLOSING" and out[0].layout == "TITLE"
+
+
+def test_overlapping_but_distinct_slides_are_kept():
+    from deckgen.spec.spec_generator import _near_duplicates
+
+    a = slide(id="s02", title="Audi won the 1982 manufacturers title", composition={"kind": "icon_rows", "items": [
+        {"icon": "FaBook", "heading": "Audi", "body": "Audi quattro won the 1982 manufacturers title"}, {"icon": "FaBook", "heading": "Rules", "body": "Group B needed 200 cars"}]})
+    b = slide(id="s03", title="Peugeot dominated 1985 and 1986", composition={"kind": "icon_rows", "items": [
+        {"icon": "FaBook", "heading": "Peugeot", "body": "The 205 T16 won 1985 and 1986 titles"}, {"icon": "FaBook", "heading": "Rules", "body": "Group B needed 200 cars"}]})
+    assert not _near_duplicates([a, b]) and _near_duplicates([a, a])
+
+
+def test_checker_issue_blocks_only_when_code_confirms_it():
+    from deckgen.spec.faithfulness import check_slide_text
+    from deckgen.spec.claims import name_core
+
+    s = slide(id="s02", title="Audi won in 1982", composition=None, placeholders={"body": ["Audi won in 1982", "Mouton drove an invented Zeta GT in 1984"]}, source_refs=["f01"])
+    ok = FakeLLM({"faithfulness": {"issues": []}})
+    assert check_slide_text(ok, s, [FINDINGS["f01"]]) == []
+    bad = FakeLLM({"faithfulness": {"issues": [{"claim_quote": "Mouton drove an invented Zeta GT in 1984", "kind": "unsupported", "contradicting_or_missing_passage": "x"},
+                                              {"claim_quote": "Audi won in 1982", "kind": "unsupported", "contradicting_or_missing_passage": "supported, no issue"},
+                                              {"claim_quote": "words not on the slide", "kind": "unsupported"}]}})
+    levels = [x.level for x in check_slide_text(bad, s, [FINDINGS["f01"]], source_text="Audi won in 1982.")]
+    assert levels == ["hard", "warn", "warn"]   # only the quote that is verbatim on the slide AND has untraceable key tokens is hard
+    assert name_core("The Portugal") == "Portugal" and name_core("The Quattro") == "Quattro" and name_core("Michele Mouton") == "Michele Mouton"
 
 
 def test_title_slide_comes_from_the_request_not_findings():
@@ -260,13 +286,14 @@ def test_redundancy_keeps_the_richer_slide_even_when_it_is_the_later_one(tmp_pat
 
     vocab = "amber basil cedar delta ember fjord glint haven ivory jaded kappa lunar mango noble ocean pearl quartz raven sable tulip".split()
 
-    def mk(i, refs):
-        items = [{"icon": "FaBook", "heading": f"Head {k}", "body": f"{vocab[(i * 3 + k) % 20]} {vocab[(i * 3 + k + 5) % 20]} {vocab[(i * 3 + k + 11) % 20]} {vocab[(i * 3 + k + 15) % 20]} 1982"} for k in range(3)]
+    def mk(i, refs, w=None):
+        w = i if w is None else w
+        items = [{"icon": "FaBook", "heading": f"Head {k}", "body": f"{vocab[(w * 3 + k) % 20]} {vocab[(w * 3 + k + 5) % 20]} {vocab[(w * 3 + k + 11) % 20]} {vocab[(w * 3 + k + 15) % 20]} 1982"} for k in range(3)]
         return slide(id=f"s{i:02d}", source_refs=refs, title=f"Distinct message number {i} here", composition={"kind": "icon_rows", "items": items})
 
     by_id = {f"f0{i}": FINDINGS["f01"].model_copy(update={"id": f"f0{i}"}) for i in range(1, 7)}
     by_id["f03"] = by_id["f03"].model_copy(update={"tier": 4})                      # an authoritative finding only the later slide cites
-    slides = [slide(id="s01", layout="TITLE", title="T", composition=None, source_refs=[])] +              [mk(2, ["f01", "f02"]), mk(3, ["f01", "f02", "f03"]), mk(4, ["f04"]), mk(5, ["f05"]), mk(6, ["f06"])] +              [slide(id="s07", layout="CLOSING", title="Next", composition=None, placeholders={"body": ["Watch the rules"]}, source_refs=["f01"])]
+    slides = [slide(id="s01", layout="TITLE", title="T", composition=None, source_refs=[])] +              [mk(2, ["f01", "f02"]), mk(3, ["f01", "f02", "f03"], 2), mk(4, ["f04"]), mk(5, ["f05"]), mk(6, ["f06"])] +              [slide(id="s07", layout="CLOSING", title="Next", composition=None, placeholders={"body": ["Watch the rules"]}, source_refs=["f01"])]
     outline = Outline(arc="timeline", deck_title="D", slides=[OutlineSlide(n=i, section="S", purpose="p", key_message="k") for i in range(1, 8)])
     out = _repair_deck(FakeLLM({"deck_consistency": {"problems": []}}), Brief(topic="t", audience="a", slide_count=9), outline, by_id,
                        Path("brand/default_v1"), slides, tmp_path)

@@ -19,6 +19,9 @@ OVERCLAIMS = ["first", "only", "all", "every", "always", "never", "none", "expon
 OVERCLAIM_RE = re.compile(r"(?<![-\w])(" + "|".join(OVERCLAIMS) + r")(?![-\w])", re.I)
 NUM_RE = re.compile(r"\d[\d,]*\.?\d*%?")
 NAME_RE = re.compile(r"\b[A-Z][a-zA-Z]{2,}(?:\s+[A-Z][a-zA-Z]{2,})+\b")
+LEAD_WORDS = {"the", "a", "an", "this", "that", "these", "those", "its", "their", "his", "her", "our", "in", "on", "at", "by", "for", "with", "from",
+              "after", "before", "during", "when", "while", "as", "and", "but", "or", "both", "each", "most", "many", "some", "several", "one", "two",
+              "three", "four", "five", "six", "since", "until", "into", "over", "under", "within", "between", "across", "despite", "although"}
 WORD_RE = re.compile(r"\b[a-z]{5,}\b")
 TIER_A = {"official", "archive"}
 _spell = SpellChecker()
@@ -112,10 +115,20 @@ def _has_run(toks: list[str], snippet: list[str], n: int) -> bool:
     return any(" ".join(toks[i:i + n]) in grams for i in range(len(toks) - n + 1))
 
 
-def claim_violations(s: SlideSpec, findings: dict[str, Finding]) -> list[Violation]:
+def name_core(name: str) -> str:
+    """A sentence-initial article, preposition or determiner is not part of a name: 'The Portugal' -> 'Portugal'."""
+    words = name.split()
+    while words and words[0].lower() in LEAD_WORDS:
+        words = words[1:]
+    return " ".join(words)
+
+
+def claim_violations(s: SlideSpec, findings: dict[str, Finding], extra: str = "") -> list[Violation]:
+    """`extra` is further text the writer was shown (source passages): names may be grounded there too (case-insensitive)."""
     out: list[Violation] = quality_violations(s, findings)
     cited = _cited_text(s, findings)
     low = cited.lower()
+    name_low = low + " " + extra.lower()
     fields = visible_fields(s)
 
     # 1. strong wording the findings do not use
@@ -140,7 +153,8 @@ def claim_violations(s: SlideSpec, findings: dict[str, Finding]) -> list[Violati
         if field in HEADINGS:
             continue
         for m in NAME_RE.finditer(text):
-            if m.group(0).lower() not in low:
+            core = name_core(m.group(0))
+            if core and core.lower() not in name_low:
                 out.append(v("name_in_body_grounded", f"name '{m.group(0)}' in '{text[:50]}' does not appear in the cited findings"))
     # 4. verbatim copying of source wording: a long run is a hard gate, a shorter run only a warning
     snippets = [re.findall(r"[a-z0-9']+", findings[r].evidence_snippet.lower()) for r in s.source_refs if r in findings]

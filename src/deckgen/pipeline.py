@@ -53,15 +53,44 @@ def _photo_catalog(llm, brief, outline, run_dir: Path, ledger, force: int):
         return Catalog.from_json(path.read_text(encoding="utf-8"), dest)
     if ledger:
         ledger.stage = "photos"
-    try:
-        cat = Catalog(find_for_outline(llm, brief, outline), dest)
-    except Exception as e:  # noqa: BLE001 - photos are a bonus; the deck still builds without them
-        print(f"photos: skipped ({type(e).__name__}: {str(e)[:100]})")
-        cat = Catalog({}, dest)
+    from deckgen.research.photos import user_agent
+
+    if user_agent() is None:
+        msg = "photos: SKIPPED, DECKGEN_CONTACT is not set (Wikimedia requires a contact in the User-Agent)"
+        print(msg)
+        cat = Catalog({}, dest, [{"ok": False, "error": msg}])
+    else:
+        log: list = []
+        try:
+            cat = Catalog(find_for_outline(llm, brief, outline, log=log), dest, log)
+        except Exception as e:  # noqa: BLE001 - photos are a bonus, but the failure is reported
+            msg = f"photos: FAILED ({type(e).__name__}: {str(e)[:100]})"
+            print(msg)
+            cat = Catalog({}, dest, log + [{"ok": False, "error": msg}])
     path.write_text(cat.to_json(), encoding="utf-8")
     if ledger:
         ledger.stage_line("photos")
     return cat
+
+
+HEDGE_RE = re.compile(r"(approximately|roughly|about|around|reportedly|according to|sources differ|estimated|some sources)", re.I)
+
+
+def hedged_claims(spec: DeckSpec) -> int:
+    """Visible text fragments on slides that carry hedging wording (contested or weakly sourced facts are meant to)."""
+    from deckgen.spec.claims import visible_fields
+
+    return sum(bool(HEDGE_RE.search(t)) for s in spec.slides for _, t in visible_fields(s))
+
+
+def photo_status(photos, spec: DeckSpec) -> dict:
+    """What happened with photos, plainly: skipped, failed, or how many were searched / offered / placed."""
+    if photos is None:
+        return {"status": "disabled (DECKGEN_PHOTOS=0)"}
+    errors = [e["error"] for e in photos.log if not e.get("ok", True)]
+    placed = sum(bool(s.photo) for s in spec.slides)
+    return {"status": "ok" if not errors else "problems", "searches": sum("query" in e for e in photos.log), "offered": sum(len(c) for c in photos.cands.values()),
+            "placed": placed, "errors": errors}
 
 
 def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *, auto_approve: bool = False,
@@ -97,6 +126,9 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
         outliner.outline(llm, brief, findings), brief, ids, run_dir / "outline.json", auto_approve, confirm, edit))
     photos = _photo_catalog(llm, brief, outline, run_dir, ledger, force) if CONFIG.photos else None
     spec = stage("spec", run_dir / "deck_spec.json", DeckSpec, lambda: generate_spec(llm, brief, outline, findings, brand_dir, run_dir, photos=photos))
+
+    if photos is not None:  # per-photo status (searches, downloads, failures) is written after the spec stage has used the catalog
+        (run_dir / "photos.json").write_text(photos.to_json(), encoding="utf-8")
 
     qa_report: QAReport | None = None
     if do_qa:
@@ -159,6 +191,11 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
         "roles": tracer.role_summary() if isinstance(tracer, Tracer) else {},
         "budget": llm.budget_report() if hasattr(llm, "budget_report") else {},
         "models": sorted(tracer.models) if isinstance(tracer, Tracer) else [],
+        "photos": photo_status(photos, spec),
+        "hedged_claims": hedged_claims(spec),
+        "pages_read": len(findings.passages),
+        "single_low_tier_used": sorted({r for s in spec.slides for r in s.source_refs
+                                        if r in by_id and by_id[r].tier <= 1 and by_id[r].independent_origin_count <= 1}),
         "cost": {"total_usd": round(ledger.total, 4), "budget_usd": ledger.budget} if ledger else None,
         "outline_auto_approved": bool(auto_approve),
         "qa_stopped": qa_report.stopped if qa_report else None,
@@ -259,7 +296,10 @@ def write_sources(path: Path, used) -> None:
 
 
 def report_md(r: dict) -> str:
-    rows = [f"# Run report: {r['run_id']}", "", f"Topic: {r['topic']}", "",
+    ph = r.get("photos", {})
+    rows = [f"# Run report: {r['run_id']}", "", f"Topic: {r['topic']}", ""] + ([f"**PHOTOS: {ph['status']}; {ph.get('searches', 0)} searches, {ph.get('offered', 0)} candidates, "
+            f"{ph.get('placed', 0)} placed. " + " | ".join(ph.get("errors", []))[:400] + "**", ""] if ph and (ph.get("errors") or ph.get("placed", 0) == 0) else []) + [""] + [
+            f"- pages read: {r['pages_read']}; hedged claims on slides: {r['hedged_claims']}; findings on slides resting on a single low-tier source: {len(r['single_low_tier_used'])}",
             f"- slides: {r['slides']}; findings: {r['findings']} ({r['findings_used']} used)",
             f"- research: {r['research_stats']}", f"- stage seconds: {r['stage_seconds']}",
             f"- unsourced slides (must be 0): {r['unsourced_slides']}",

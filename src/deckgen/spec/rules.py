@@ -38,7 +38,7 @@ def _fmt(val: float) -> str:
     return str(int(val)) if float(val).is_integer() else f"{val:g}"
 
 
-def check_slide_v(s: SlideSpec, findings: dict[str, Finding], prev: list[SlideSpec]) -> list[Violation]:
+def check_slide_v(s: SlideSpec, findings: dict[str, Finding], prev: list[SlideSpec], extra: str = "") -> list[Violation]:
     e: list[Violation] = []
     n_words = lambda t: len(t.split())
     if s.layout not in SHORT_TITLE_OK and n_words(s.title) < 4:
@@ -126,7 +126,7 @@ def check_slide_v(s: SlideSpec, findings: dict[str, Finding], prev: list[SlideSp
     if s.layout == "TITLE_ONLY" and not c:
         e.append(v("layout_needs_content", "TITLE_ONLY needs a composition (cards, icon_rows, stats, timeline or comparison)"))
 
-    e += claim_violations(s, findings)
+    e += claim_violations(s, findings, extra)
 
     # variety
     key = (s.layout, c.kind if c else None)

@@ -44,12 +44,10 @@ class Adapter:
             raise RuntimeError(f"Anthropic API {r.status_code}: {r.text[:400]}")
         j = r.json()
         text = "".join(b.get("text", "") for b in j.get("content", []) if b.get("type") == "text")
-        if not text.strip():  # say why: a response with no text block must not look like an empty-JSON parse error
-            raise ProviderUnavailable(f"empty response: stop_reason={j.get('stop_reason')} blocks={[b.get('type') for b in j.get('content', [])]} out={j.get('usage', {}).get('output_tokens')}")
         u = j.get("usage", {})
         rem = h.get("anthropic-ratelimit-tokens-remaining")
         return RawResult(text=text, tokens_in=u.get("input_tokens", 0), tokens_out=u.get("output_tokens", 0), model=j.get("model", model),
-                         cache_write_tokens=u.get("cache_creation_input_tokens", 0) or 0, cache_read_tokens=u.get("cache_read_input_tokens", 0) or 0,
+                         stop_reason=j.get("stop_reason") or "", cache_write_tokens=u.get("cache_creation_input_tokens", 0) or 0, cache_read_tokens=u.get("cache_read_input_tokens", 0) or 0,
                          remaining_tokens=int(rem) if rem and rem.isdigit() else None)
 
     def list_models(self) -> list[str]:
