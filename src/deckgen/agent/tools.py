@@ -15,7 +15,7 @@ from deckgen.ledger import Ledger
 from deckgen.research.weigh import TierTable
 
 CLOSED_AFTER_RESEARCH = {"search", "fetch_page", "summarize_sources"}      # these spend money or pages; read_source only reads saved files
-CLOSED_IN_WRAPUP = {"write_build_script", "run_build", "render_slides"}
+CLOSED_IN_WRAPUP = {"write_build_script", "edit_build_script", "run_build", "render_slides"}
 
 
 class AgentTools:
@@ -32,7 +32,7 @@ class AgentTools:
         self._handlers = {
             "search": self.reader.t_search, "fetch_page": self.reader.t_fetch_page, "read_source": self.reader.t_read_source,
             "summarize_sources": self.reader.t_summarize_sources, "write_file": self.t_write_file, "read_file": self.t_read_file,
-            "write_build_script": self.builder.t_write_build_script, "run_build": self.builder.t_run_build, "render_slides": self.builder.t_render_slides,
+            "write_build_script": self.builder.t_write_build_script, "edit_build_script": self.builder.t_edit_build_script, "run_build": self.builder.t_run_build, "render_slides": self.builder.t_render_slides,
             "slide_text": self.builder.t_slide_text, "finish": self.builder.t_finish,
         }
 
@@ -100,6 +100,8 @@ def tool_definitions() -> list[dict]:
         {"name": "read_file", "description": "Read a file inside work/.", "input_schema": obj(path=txt())},
         {"name": "write_build_script", "description": "Write the pptxgenjs build script (a .js file inside work/). append=true writes a long script in parts.",
          "input_schema": obj(path=txt(), content=txt(), append={"type": "boolean", "optional": True})},
+        {"name": "edit_build_script", "description": "Replace one exact piece of the build script (old must match exactly once). Use this for small fixes instead of rewriting the whole file.",
+         "input_schema": obj(path=txt(), old=txt(), new=txt())},
         {"name": "run_build", "description": "Run the build script in the restricted Node runner on the brand frame, apply the theme, then run file validation and the geometry checks. "
          "Returns errors with the script line, and per-slide issues.", "input_schema": obj(script_path={"type": "string", "optional": True})},
         {"name": "render_slides", "description": "Render a built deck through LibreOffice and return up to 4 slide images per call so you can look at them.",

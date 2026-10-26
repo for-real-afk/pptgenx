@@ -152,3 +152,9 @@ Live runs used Anthropic (Haiku 5.5 for reading, Sonnet 5.5 for writing) under a
 - **Account cap**: `deckgen agent` sums every run's `usage.jsonl` and stops (asks) when the run budget exceeds what is left under the $25 account cap.
 - Deviation to note: titles on content slides are 28 pt (set by the brand layouts, which the old pipeline shares), not 36 pt.
 - Offline tests: gap rule, phase hand-over, wrap-up, budget abort, sandbox (no outside reads, no network, error line numbers), overflow reported with its slide, finish refusals, view caps. A real Docker render of a script-built deck was checked by hand.
+
+### Agent v3 first live run (`wrc-agent-v3`, $5 budget, 85 tool-call limit): $2.22, 13 slides
+- Phases: research $0.98 (24 turns, 5 pages, 1 gap named), write $0.54 (11 turns), look $0.70 (34 turns). No phase hand-over fired; the 85-tool-call limit ended the run, not the money.
+- What went wrong: about 10 turns were spent probing the helper API (printing helper source onto slides, 4 builds failing with `undefined.length`); 19 builds and 19 whole-script rewrites; the run hit the tool limit before review notes and the look-at-every-slide pass finished.
+- Bug found and fixed: salvage picked a one-slide debug probe as "best build" (it had fewer issues than the real deck). Ranking is now: fewest hard issues, then most slides, then fewest blocking issues. The deliverable was re-selected from the run's own builds (build 19), no new model spend.
+- Fixes: tool-limit wrap-up at 85% of the limit, helper arguments validated with clear messages and exact signatures in the skill, `edit_build_script` for small fixes.

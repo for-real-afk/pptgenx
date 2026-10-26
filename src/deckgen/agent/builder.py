@@ -49,9 +49,9 @@ class BuildRecord:
         return policy.blocking(self.issues)
 
     @property
-    def rank(self) -> tuple[int, int]:
-        """Lower is better: hard problems first, then all blocking ones."""
-        return len(self.hard), len(self.blocking)
+    def rank(self) -> tuple[int, int, int]:
+        """Lower is better: hard problems first, then MORE slides (a one-slide probe must never beat the real deck), then blocking issues."""
+        return len(self.hard), -self.slides, len(self.blocking)
 
 
 def default_inspector(brand_dir: Path) -> Inspector:
@@ -135,8 +135,20 @@ class DeckBuilder:
         return head + NL + (NL.join(lines) or "no automated issues")
 
     def best(self) -> BuildRecord | None:
-        """The build with the fewest hard, then blocking, issues; the latest wins ties."""
+        """The build with the fewest hard issues, then the most slides, then the fewest blocking issues; the latest wins ties."""
         return min(reversed(list(self.builds.values())), key=lambda r: r.rank, default=None)
+
+    def t_edit_build_script(self, path: str, old: str, new: str) -> str:
+        """Replace one exact piece of the script (cheaper than rewriting the whole file for a small fix)."""
+        text = self.work.read(path)
+        if not old:
+            raise ToolError("old must be the exact text to replace")
+        n = text.count(old)
+        if n != 1:
+            raise ToolError(f"old text found {n} times in work/{self.work.path(path).name}; it must match exactly once (add surrounding lines to make it unique)")
+        p = self.work.write(path, text.replace(old, new, 1))
+        self.script = p.name
+        return f"edited work/{p.name} ({len(old)} -> {len(new)} characters). Run it with run_build."
 
     # ---- look -------------------------------------------------------------------------------------------------------------------------
     def _deck(self, deck_path: str) -> Path:

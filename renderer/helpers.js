@@ -7,6 +7,17 @@ const { addChart, addTable } = require("./build_deck");
 
 const ctx = (pres, slide, C, theme) => ({ pres, slide, C, theme });
 
+// Clear argument errors: a build script that passes the wrong shape gets a sentence that names the helper and the expected shape, not "undefined.length".
+const need = (ok, name, shape) => { if (!ok) throw new Error(`h.${name}: ${shape}`); };
+const isCtx = (c) => c && c.slide && c.pres && c.C;
+const isRect = (r) => r && [r.x, r.y, r.w, r.h].every(Number.isFinite);
+const composed = (name, itemShape) => async (c, items, region = CONTENT) => {
+  need(isCtx(c), name, "first argument must be the context from h.ctx(pres, slide, C, theme)");
+  need(Array.isArray(items) && items.length > 0, name, `items must be a non-empty array of ${itemShape}`);
+  need(isRect(region), name, "region must be a rect { x, y, w, h } in inches (default h.CONTENT)");
+  return compose[name](c, items, region);
+};
+
 /** Text box with margin 0 (pptxgenjs default margins misalign text with shapes). */
 const textBox = (c, str, o) => text(c, str, { fontSize: 16, color: c.C.text1, valign: "top", ...o });
 
@@ -41,13 +52,25 @@ function stat(c, r, { value, label, detail }, name = "Stat") {
 }
 
 /** Styled native table. header: [..], body: [[..]]; cells <= ~34 characters; at most 6 rows. */
-const table = (c, header, body, r = CONTENT) => addTable(c.slide, c.pres.SchemeColor, { header, rows: body }, r);
+const table = (c, header, body, r = CONTENT) => {
+  need(isCtx(c) && Array.isArray(header) && Array.isArray(body) && body.every(Array.isArray), "table", "table(c, header: string[], rows: string[][], rect = CONTENT)");
+  return addTable(c.slide, c.pres.SchemeColor, { header, rows: body }, r);
+};
 
 /** Styled native chart. type: bar | column | line | pie | doughnut; series: [{ name, values }]. */
-const chart = (c, type, title, categories, series, r = CONTENT, numberFormat) =>
-  addChart(c.slide, c.pres, c.theme, { type, title, categories, series, number_format: numberFormat }, r);
+const chart = (c, type, title, categories, series, r = CONTENT, numberFormat) => {
+  need(isCtx(c) && ["bar", "column", "line", "pie", "doughnut"].includes(type) && Array.isArray(categories) && Array.isArray(series) && series.every((s) => Array.isArray(s.values)),
+    "chart", "chart(c, type: bar|column|line|pie|doughnut, title: string, categories: string[], series: [{ name, values: number[] }], rect = CONTENT)");
+  return addChart(c.slide, c.pres, c.theme, { type, title, categories, series, number_format: numberFormat }, r);
+};
 
 /** Speaker notes. Name the source of each claim on the slide. */
 const notes = (c, str) => c.slide.addNotes(str);
 
-module.exports = { ctx, textBox, bullets, card, badge, stat, table, chart, notes, panel, iconCircle, ...compose, CONTENT, MARGIN, GAP, W, H, SOURCE_Y, cols, rows, grid };
+const cards = composed("cards", "{ icon, heading, body } (2, 3, 4 or 6)");
+const stats = composed("stats", "{ value, label, detail? } (2 to 4)");
+const timeline = composed("timeline", "{ year, heading, body } (3 to 5)");
+const comparison = composed("comparison", "{ heading, bullets: string[] } (exactly 2)");
+const icon_rows = composed("icon_rows", "{ icon, heading, body } (2 to 5)");
+
+module.exports = { ctx, textBox, bullets, card, badge, stat, table, chart, notes, panel, iconCircle, cards, stats, timeline, comparison, icon_rows, CONTENT, MARGIN, GAP, W, H, SOURCE_Y, cols, rows, grid };

@@ -22,6 +22,7 @@ KEEP_RECENT_RESULTS = 8          # tool results kept in full; older bulky ones a
 BULKY = ("read_source", "fetch_page", "summarize_sources", "read_file", "search")
 TRIM_TO = 300
 NET_TRIES = 5
+LIMIT_WARNING = 0.85         # share of the tool-call limit after which the agent is told to wrap up
 
 
 def anthropic_transport(body: dict) -> dict:
@@ -158,6 +159,10 @@ class AgentLoop:
             if time.time() - t_start > self.max_seconds:
                 self.stop_reason = f"wall clock limit ({self.max_seconds}s)"
                 break
+            if self.tool_calls >= self.max_calls * LIMIT_WARNING and self.phases.advance("wrapup", "tool call limit nearly reached"):
+                self.tools.start_wrapup()
+                self.messages.append({"role": "user", "content": "WRAP-UP: the tool call limit is nearly reached. Do not build or render again. Write review.md (including every "
+                                                                 "defect you saw but did not fix) and call finish now."})
             if self.phases.phase == "wrapup":
                 self.wrapup_turns += 1
                 if self.wrapup_turns > WRAPUP_TURNS:

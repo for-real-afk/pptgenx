@@ -243,3 +243,37 @@ def test_old_images_and_bulky_results_are_trimmed():
     assert out[1]["content"][0]["content"][0]["type"] == "text" and out[2]["content"][0]["content"][0]["type"] == "image"
     thinking = [{"role": "user", "content": "t"}, {"role": "assistant", "content": [{"type": "thinking", "thinking": "x", "signature": "s"}, {"type": "text", "text": "hi"}]}]
     assert [b["type"] for b in trim(thinking, {})[1]["content"]] == ["text"]
+
+
+def test_the_best_build_is_the_real_deck_not_a_trivial_probe(tmp_path, roles):
+    from deckgen.agent.builder import BuildRecord
+
+    tools, _, _ = make_tools(tmp_path)
+    b = tools.builder
+    b.builds = {"probe": BuildRecord(deck=tmp_path / "probe.pptx", slides=1, issues=[]),
+                "real": BuildRecord(deck=tmp_path / "real.pptx", slides=13, issues=[]),
+                "broken": BuildRecord(deck=tmp_path / "broken.pptx", slides=14, issues=[__import__("deckgen.schemas.qa", fromlist=["Issue"]).Issue(
+                    slide=3, type="overflow", severity="high", description="x", suggested_fix="y", source="auto")])}
+    assert b.best().deck.name == "real.pptx"                      # fewest hard issues first, then the most slides
+
+
+def test_edit_build_script_replaces_one_exact_piece(tmp_path, roles):
+    tools, _, _ = make_tools(tmp_path)
+    tools.call("write_build_script", {"path": "build.js", "content": GOOD_SCRIPT})
+    out, err = tools.call("edit_build_script", {"path": "build.js", "old": "First point", "new": "Changed point"})
+    assert not err and "Changed point" in tools.work.read("build.js")
+    assert tools.call("edit_build_script", {"path": "build.js", "old": "h.ctx(pres", "new": "x"})[1] is False      # unique
+    out, err = tools.call("edit_build_script", {"path": "build.js", "old": "placeholder", "new": "x"})
+    assert err and "must match exactly once" in out
+
+
+def test_the_agent_is_told_to_wrap_up_before_the_tool_call_limit(tmp_path, roles):
+    responses = [reply(use(i, "read_file", path="notes.md")) for i in range(1, 12)] + [reply(use(12, "write_file", path="review.md", content="- x\n"))]
+    tr = scripted(responses + [reply({"type": "text", "text": "done"}, stop="end_turn")] * 10)
+    from deckgen.agent.loop import AgentLoop
+    from deckgen.agent.tools import tool_definitions
+
+    tools, ledger, phases = make_tools(tmp_path)
+    loop = AgentLoop(tools, ledger, phases, model="m-main", system_text="s", tool_defs=tool_definitions(), max_calls=10, max_seconds=60, transport=tr)
+    loop.run("task")
+    assert any("tool call limit is nearly reached" in json.dumps(c["messages"]) for c in tr.calls) and phases.phase == "wrapup"
