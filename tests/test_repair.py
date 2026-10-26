@@ -68,21 +68,6 @@ def test_merge_groups_joins_the_same_subject_and_attribute():
     assert len(merged) == 2 and sorted(m.id for m in merged[0].members) == ["f01", "f02"]
 
 
-def test_deterministic_check_fails_when_two_slides_state_different_values():
-    from deckgen.research.facts import Entry, Sheet, facts_problems
-
-    sheet = Sheet(entries=[Entry(subject="Audi", attribute="withdrawal timing", status="resolved", value="after Corsica 1986", tier=4, source="wrc.com",
-                                 values=["after Corsica 1986", "after Portugal 1985"], ids=["f01", "f02"])])
-
-    def deck(*titles):
-        return DeckSpec(title="D", brand="default_v1", slides=[slide(id="s01", layout="TITLE", title="T", composition=None, source_refs=[])] +
-                        [slide(id=f"s{i:02d}", title=t, composition=None, placeholders={"body": [t]}) for i, t in enumerate(titles, 2)])
-
-    bad = facts_problems(deck("Audi withdrew after Portugal 1985", "Audi withdrew after Corsica 1986"), sheet)
-    assert any(p.slides == [2, 3] for p in bad) and any(p.slides == [2] for p in bad)      # different values on two slides; slide 2 also disagrees with the sheet
-    assert facts_problems(deck("Audi withdrew after Corsica 1986", "Audi left after Corsica 1986 too"), sheet) == []
-
-
 def test_chart_data_is_filled_by_code_from_the_named_data_set():
     import pytest
 
@@ -114,3 +99,67 @@ def test_whole_deck_call_returns_first_versions_and_failures_fall_back():
     llm = FakeLLM({"spec_deck": DeckDraft(slides=[good, bad])})
     got = write_deck(llm, brief, outline, pool, Path("brand/default_v1"), {}, "FACTS SHEET: x")
     assert set(got) == {2} and "FACTS SHEET: x" in llm.calls[0]["prompt"] and "APPROVED OUTLINE" in llm.calls[0]["prompt"]
+
+
+def _sheet(status="resolved"):
+    from deckgen.research.facts import Entry, Sheet
+
+    return Sheet(entries=[Entry(subject="Audi", attribute="withdrawal timing", status=status, value="after Corsica 1986" if status == "resolved" else "sources differ: a vs b",
+                                tier=4, source="wrc.com", values=["after Corsica 1986", "after Portugal 1985"], ids=["f01"])])
+
+
+def _autofix(sheet, quotes):
+    from deckgen.spec.spec_generator import _repair_deck
+
+    spec, outline, brief, findings = _deck()
+    by_id = {x.id: x for x in findings.findings}
+    prob = {"kind": "contradiction", "slides": [2, 3], "description": "different accounts of Audi withdrawal timing", "quotes": quotes}
+    fixer = {"edits": [{"action": "replace", "path": "/title", "text": "Audi left after Corsica 1986"}], "cite": []}
+    llm = FakeLLM({"deck_consistency": {"problems": [prob]}, "fixer": fixer})
+    out = _repair_deck(llm, brief, outline, by_id, Path("brand/default_v1"), list(spec.slides), None, None, sheet)
+    return out, llm
+
+
+Q2 = {"slide": 2, "text": "Audi left after Portugal in 1985 here"}
+Q3 = {"slide": 3, "text": "Audi left after Corsica in 1986 here"}
+
+
+def test_autofix_needs_both_quotes_on_slides_and_a_resolved_sheet_value():
+    out, llm = _autofix(_sheet(), [Q2, Q3])
+    assert any(c["stage"] == "fixer" for c in llm.calls) and out[1].title == "Audi left after Corsica 1986"       # one small diff, applied
+    for sheet, quotes in ((_sheet("differ"), [Q2, Q3]), (_sheet(), [Q2]), (None, [Q2, Q3])):                       # tie, one quote, no sheet: review list only
+        _, llm = _autofix(sheet, quotes)
+        assert not any(c["stage"] == "fixer" for c in llm.calls)
+
+
+def test_cut_off_answer_retries_with_more_room_and_fixer_retries_once(tmp_path):
+    from pydantic import BaseModel
+
+    from deckgen.llm import RateLimiter, RoleLLM, RoleSpec, Tracer
+    from deckgen.providers import register
+    from deckgen.providers.base import RawResult
+    from deckgen.providers.fake import Adapter as FakeAdapter
+
+    class O(BaseModel):
+        x: int
+
+    class Cutting(FakeAdapter):
+        def complete(self, **kw):
+            r = super().complete(**kw)
+            return RawResult(text=r.text, tokens_in=10, tokens_out=kw["max_tokens"], model=kw["model"], stop_reason="max_tokens" if len(self.calls) == 1 else "end_turn")
+
+    a = Cutting()
+    register("cutter", a)
+    a.script = ['{"x": 1', '{"x": 1}']
+    roles = {r: RoleSpec(provider="cutter", model="m", max_tokens=500) for r in ("extractor", "writer", "checker", "critic")}
+    llm = RoleLLM(roles, Tracer(tmp_path / "t.jsonl"), cache_dir=tmp_path / "c", use_cache=False, limiter_factory=lambda p: RateLimiter(None, clock=lambda: 0.0, sleep=lambda s: None))
+    assert llm.generate(stage="facts_sheet", system="s", prompt="p", schema=O).x == 1
+    assert len(a.calls) == 2                                                                  # cut off once, retried once (with the limit raised to 1000)
+    a2 = FakeAdapter()
+    register("cutter", a2)
+    a2.script = ['{"y": 1}', '{"y": 2}', '{"x": 3}']
+    try:
+        llm.generate(stage="fixer", system="s", prompt="p2", schema=O)
+        raise AssertionError("expected a failure after one retry")
+    except ValueError as e:
+        assert "after 2 attempts" in str(e) and len(a2.calls) == 2                            # fixer: one validation-error retry only

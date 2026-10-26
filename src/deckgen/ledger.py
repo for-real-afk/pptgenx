@@ -98,12 +98,12 @@ class Ledger:
 
     # -- recording -------------------------------------------------------------------------------------------------
     def record(self, *, role: str, llm_stage: str, model: str, tin: int, tout: int, cw: int = 0, cr: int = 0, latency_s: float = 0.0,
-               cache: str = "miss", retry: int = 1, outcome: str = "ok", saved_usd: float = 0.0) -> float:
+               cache: str = "miss", retry: int = 1, outcome: str = "ok", saved_usd: float = 0.0, error: str = "") -> float:
         usd = 0.0 if cache == "hit" else self.cost(model, tin, tout, cw, cr)
         self.total += usd
         row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "pipeline_stage": self.stage, "role": role, "stage": llm_stage, "model": model,
                "input_tokens": tin, "output_tokens": tout, "cache_write_tokens": cw, "cache_read_tokens": cr, "cost_usd": round(usd, 6),
-               "latency_s": round(latency_s, 2), "cache": cache, "retry": retry, "outcome": outcome, "saved_usd": round(saved_usd, 6),
+               "latency_s": round(latency_s, 2), "cache": cache, "retry": retry, "outcome": outcome, "saved_usd": round(saved_usd, 6), "error": error,
                "running_total_usd": round(self.total, 6)}
         self.rows.append(row)
         if self.path:

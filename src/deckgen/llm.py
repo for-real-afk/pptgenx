@@ -25,6 +25,8 @@ T = TypeVar("T", bound=BaseModel)
 NL = chr(10)
 
 ROLES = ("extractor", "writer", "checker", "critic")
+PARSE_ATTEMPTS = {"fixer": 2, "facts_sheet": 2}   # one validation-error retry only; a cut-off answer gets a larger max_tokens on the retry
+MAX_TOKENS_CEILING = 16_000
 STAGE_ROLE = {
     "plan": "extractor", "outline": "writer", "spec_slide": "writer", "spec_fallback_labels": "writer", "fixer": "writer",
     "research_query": "extractor", "research_extract": "extractor", "image_queries": "extractor", "facts_sheet": "checker", "spec_deck": "writer",
@@ -254,15 +256,17 @@ class RoleLLM:
         adapter, lim = get_adapter(provider), self.limiter(provider)
         schema_json = json.dumps(schema.model_json_schema())
         text_prompt, last_err, t0 = full, None, time.time()
-        for attempt in range(1, CONFIG.parse_attempts + 1):
+        max_tok = spec.max_tokens
+        attempts = PARSE_ATTEMPTS.get(stage, CONFIG.parse_attempts)
+        for attempt in range(1, attempts + 1):
             waited0, raw = lim.waited, None
             if self.ledger:  # hard budget guard: stop BEFORE a call that could exceed the cap (raises BudgetAbort)
-                self.ledger.check(model, system, cache_prefix + text_prompt, spec.max_tokens, len(images or []))
+                self.ledger.check(model, system, cache_prefix + text_prompt, max_tok, len(images or []))
             for net in range(1, CONFIG.net_attempts + 1):
-                lim.before(est_tokens(system, cache_prefix + text_prompt, images, spec.max_tokens))
+                lim.before(est_tokens(system, cache_prefix + text_prompt, images, max_tok))
                 try:
                     raw = adapter.complete(model=model, system=system, prompt=text_prompt, images=images, temperature=spec.temperature,
-                                           seed=spec.seed, max_tokens=spec.max_tokens, schema_json=schema_json, cache_prefix=cache_prefix)
+                                           seed=spec.seed, max_tokens=max_tok, schema_json=schema_json, cache_prefix=cache_prefix)
                     break
                 except RateLimited as e:
                     if e.daily:
@@ -284,17 +288,19 @@ class RoleLLM:
             except (ValidationError, ValueError) as e:
                 last_err, out, outcome = e, None, "schema_fail"
             if raw.stop_reason == "max_tokens":  # a cut-off answer is a failed call even if it happens to parse; it is billed and logged as such
-                last_err, out, outcome = ValueError(f"response was cut off at max_tokens={spec.max_tokens}; answer more briefly"), None, "truncated"
+                last_err, out, outcome = ValueError(f"response was cut off at max_tokens={max_tok}"), None, "truncated"
+                max_tok = min(max_tok * 2, MAX_TOKENS_CEILING)  # re-asking at the same limit would be cut off again: give the retry more room
             if self.ledger:  # the API's own token counts, priced from prices.yaml
                 self.ledger.record(role=role, llm_stage=stage, model=model, tin=raw.tokens_in, tout=raw.tokens_out, cw=raw.cache_write_tokens,
-                                   cr=raw.cache_read_tokens, latency_s=time.time() - t0, cache="miss", retry=attempt, outcome=outcome)
+                                   cr=raw.cache_read_tokens, latency_s=time.time() - t0, cache="miss", retry=attempt, outcome=outcome,
+                                   error=str(last_err)[:160] if outcome != "ok" else "")
             if outcome == "ok":
                 self.tracer.attempts.setdefault(stage, []).append(attempt)
                 self._cache_put(key, {"text": raw.text, "attempt": attempt, "tin": raw.tokens_in, "tout": raw.tokens_out,
                                       "cw": raw.cache_write_tokens, "cr": raw.cache_read_tokens})
                 return out
             text_prompt = f"{full}{NL}{NL}Your previous output was invalid: {str(last_err)[:500]}{NL}Return corrected JSON only."
-        raise ValueError(f"{stage}: unparseable after {CONFIG.parse_attempts} attempts: {str(last_err)[:300]}")
+        raise ValueError(f"{stage}: unparseable after {attempts} attempts: {str(last_err)[:300]}")
 
 
 class GeminiLLM(RoleLLM):

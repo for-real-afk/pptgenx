@@ -11,7 +11,7 @@ _SKIP = {"id", "section", "layout", "icon", "kind", "type", "source_refs", "sour
 
 
 class Edit(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")  # model-facing: a stray key such as "reason" must not fail the whole response
     action: Literal["replace", "delete"]
     path: str  # JSON pointer into the slide, e.g. /placeholders/body/1 or /composition/items/2/body
     text: str = ""

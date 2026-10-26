@@ -27,7 +27,7 @@ from deckgen.spec.edit_loop import apply as apply_spec_edits
 from deckgen.spec.edit_loop import check_all, edit_loop, propose, score
 from deckgen.spec.rules import check_slide_v
 from deckgen.spec.validate_spec import load_manifest, validate_spec
-from deckgen.research.facts import facts_problems
+from deckgen.research.facts import _toks as _fact_toks
 from deckgen.research.photos import listing as photo_listing
 from deckgen.spec.violations import Violation, classify_failure, hard, v
 from deckgen.spec.writer_prompt import select_source_text, stable_prefix, variable_part
@@ -350,10 +350,9 @@ def generate_spec(llm: LLM, brief: Brief, outline: Outline, findings: Findings, 
     return spec
 
 
-def _deck_problems(llm: LLM, slides: list[SlideSpec], brief: Brief, outline: Outline, by_id: dict[str, Finding], sheet=None) -> list[Problem]:
+def _deck_problems(llm: LLM, slides: list[SlideSpec], brief: Brief, outline: Outline, by_id: dict[str, Finding]) -> list[Problem]:
     spec = DeckSpec(title=outline.deck_title, brand=brief.brand, slides=slides)
-    out = consistency(llm, spec, by_id) + redundancy(spec) + shared_evidence(spec)
-    return out + (facts_problems(spec, sheet) if sheet is not None else [])
+    return consistency(llm, spec, by_id) + redundancy(spec) + shared_evidence(spec)
 
 
 def richness(s: SlideSpec, by_id: dict[str, Finding]) -> float:
@@ -374,12 +373,28 @@ def _near_duplicates(slides: list[SlideSpec], threshold: float = 0.7) -> bool:
     return any(len(ws[i] & ws[j]) / max(len(ws[i] | ws[j]), 1) >= threshold for i in range(len(ws)) for j in range(i + 1, len(ws)))
 
 
+def _resolved_entry(p: Problem, sheet):
+    """The facts-sheet entry that settles a contradiction: resolved (not 'sources differ'), and both its subject and its attribute are named in
+    the problem. None otherwise, in which case the problem only goes on the review list."""
+    if sheet is None:
+        return None
+    text = (p.description + " " + " ".join(q.text for q in p.quotes)).lower()
+    words = set(re.findall(r"[a-z0-9]+", text))
+    for e in sheet.entries:
+        if e.status != "resolved":
+            continue
+        subj, attr = _fact_toks(e.subject), _fact_toks(e.attribute)
+        if subj and attr and len(subj & words) / len(subj) >= 0.6 and len(attr & words) / len(attr) >= 0.5:
+            return e
+    return None
+
+
 def _repair_deck(llm: LLM, brief: Brief, outline: Outline, by_id: dict[str, Finding], brand_dir: Path,
                  slides: list[SlideSpec], run_dir: Path | None, extra: dict | None = None, sheet=None) -> list[SlideSpec]:
-    """One repair pass. Redundancy: KEEP THE RICHER of the two slides and delete the other (never title, closing or sources; never below
-    the slide floor). Contradictions and unclear references are fixed on the later slide with a targeted diff.
-    Whatever remains is written to deck_notes.json and surfaced in the run report."""
-    problems = _deck_problems(llm, slides, brief, outline, by_id, sheet)
+    """ONE LLM cross-slide check. Then: a near-exact duplicate slide is deleted (keep the richer; never title, closing or sources; never below the
+    floor). A contradiction is auto-fixed only when BOTH quoted statements are on slides and the facts sheet has a resolved value for it: one small
+    diff on each slide that does not state that value, one round, no re-check. Everything else is written to deck_notes.json for the review list."""
+    problems = _deck_problems(llm, slides, brief, outline, by_id)
     last = len(slides)
     drop: dict[int, str] = {}
     for p in sorted((p for p in problems if p.kind == "redundancy"), key=lambda p: max(p.slides)):
@@ -391,33 +406,40 @@ def _repair_deck(llm: LLM, brief: Brief, outline: Outline, by_id: dict[str, Find
         loser = min(cands, key=lambda n: (richness(slides[n - 1], by_id), -n))  # the poorer slide goes; on a tie the later one
         drop[loser] = f"redundant with slide(s) {[n for n in p.slides if n != loser]}; kept the richer"
     manifest = load_manifest(brand_dir)
-    repaired: list[int] = []
-    failed: list[int] = []
+    fixed: list[dict] = []
     for p in problems:
-        target = max((n for n in p.slides if 1 < n < last and n not in drop and slides[n - 1].layout not in PROTECTED), default=None)
-        if p.kind == "redundancy" or target is None:
+        entry = _resolved_entry(p, sheet) if p.kind == "contradiction" and len({q.slide for q in p.quotes}) >= 2 else None
+        if entry is None:
             continue
-        s = slides[target - 1]
-        base = check_all(llm, s, by_id, slides[:target - 1], manifest, outline.deck_title, brief.brand, faith=False)
-        problem = Violation("deck_contradiction" if p.kind == "contradiction" else "deck_unclear_reference",
-                            f"{p.kind} with slide(s) {[n for n in p.slides if n != target]}: {p.description}. Resolve it using only the findings.", "hard")
-        try:
-            cand = apply_spec_edits(s, propose(llm, s, base + [problem], by_id, pool_listing(by_id, 40)), by_id)
-            after = check_all(llm, cand, by_id, slides[:target - 1], manifest, outline.deck_title, brief.brand, faith=False)
-            if cand != s and score(after) <= score(base):
-                slides[target - 1] = cand
-                repaired.append(target)
+        line = f"FACTS SHEET: {entry.subject} / {entry.attribute}: {entry.value}. Use exactly this."
+        for q in p.quotes:
+            n = q.slide
+            if not 1 < n < last or n in drop or slides[n - 1].layout in ("TITLE", "SOURCES") or any(f["slide"] == n for f in fixed):
                 continue
-        except Exception:  # noqa: BLE001 - a failed repair keeps the original slide; the problem stays listed
-            pass
-        failed.append(target)
+            s = slides[n - 1]
+            base = check_all(llm, s, by_id, slides[:n - 1], manifest, outline.deck_title, brief.brand, faith=False)
+            problem = Violation("deck_contradiction", f"contradiction with slide(s) {[m for m in p.slides if m != n]}: {p.description}. The slide's statement "
+                                f"'{q.text}' must follow the facts sheet ({entry.value}).", "hard")
+            rec = {"slide": n, "entry": f"{entry.subject} / {entry.attribute}", "result": "unchanged"}
+            try:
+                cand = apply_spec_edits(s, propose(llm, s, base + [problem], by_id, pool_listing(by_id, 40), "", line), by_id)
+                after = check_all(llm, cand, by_id, slides[:n - 1], manifest, outline.deck_title, brief.brand, faith=False)
+                if cand != s and score(after) <= score(base):
+                    slides[n - 1] = cand
+                    rec["result"] = "edited"
+            except Exception as e:  # noqa: BLE001 - a failed fix keeps the slide; the problem stays on the review list
+                rec["result"] = f"rejected: {str(e)[:100]}"
+            fixed.append(rec)
     dropped_titles = [slides[n - 1].title for n in sorted(drop)]
     if drop:
         slides = [s for k, s in enumerate(slides, 1) if k not in drop]
-    remaining = _deck_problems(llm, slides, brief, outline, by_id, sheet) if (drop or repaired) else problems
+    found: dict[str, int] = {}
+    for p in problems:
+        found[p.kind] = found.get(p.kind, 0) + 1
     if run_dir:
-        out = {**(extra or {}), "problems_found": [p.model_dump() for p in problems], "repaired_slides": sorted(set(repaired)),
-               "repair_failed_slides": sorted(set(failed)), "deleted_slides": sorted(drop), "deleted_titles": dropped_titles,
-               "deleted_reasons": {str(k): r for k, r in drop.items()}, "unresolved": [p.model_dump() for p in remaining]}
+        out = {**(extra or {}), "problems_found": [p.model_dump() for p in problems], "autofixed": fixed, "deleted_slides": sorted(drop),
+               "deleted_titles": dropped_titles, "deleted_reasons": {str(k): r for k, r in drop.items()}, "unresolved": [p.model_dump() for p in problems],
+               "cross_check": {"found": found, "contradictions_llm": found.get("contradiction", 0), "autofix_attempts": len(fixed),
+                               "autofixed": sum(f["result"] == "edited" for f in fixed)}}
         (run_dir / "deck_notes.json").write_text(json.dumps(out, indent=1), encoding="utf-8")
     return slides

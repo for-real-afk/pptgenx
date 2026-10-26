@@ -2,7 +2,7 @@
 slide shows) and fix them, using the facts sheet as the one authoritative wording.
   contradiction / unclear_reference: small diffs (the same fixer as the per-slide loop) that may add up to GROWTH words per slide, only for the fix.
   title_mismatch: the slide is rewritten (a chart slide included; its chart data is rebuilt by code from the findings).
-The checker (plus the deterministic facts-sheet check) is re-run after each round; stop when no contradiction is left or after MAX_ROUNDS."""
+This is a MANUAL tool (`deckgen repair`), not part of the default pipeline. The checker is re-run after each round; stop when no contradiction is left or after MAX_ROUNDS."""
 from __future__ import annotations
 
 import json
@@ -92,13 +92,13 @@ def repair_deck(llm: LLM, spec: DeckSpec, brief: Brief, outline: Outline, findin
     ctx = {"by_id": by_id, "manifest": load_manifest(brand_dir), "findings": findings, "outline": outline, "brief": brief, "brand_dir": brand_dir,
            "facts_text": facts_text, "data": data, "deck_title": spec.title, "brand": spec.brand}
     slides = list(spec.slides)
-    problems = _deck_problems(llm, slides, brief, outline, by_id, sheet)
+    problems = _deck_problems(llm, slides, brief, outline, by_id)
     report = {"before": counts(problems), "rounds": [], "problems_before": [p.model_dump() for p in problems]}
     for r in range(1, rounds + 1):
         if not any(p.kind == "contradiction" for p in problems):
             break
         slides, log = repair_round(llm, slides, problems, ctx)
-        problems = _deck_problems(llm, slides, brief, outline, by_id, sheet)
+        problems = _deck_problems(llm, slides, brief, outline, by_id)
         report["rounds"].append({"round": r, "edits": log, "after": counts(problems)})
     report["after"] = counts(problems)
     report["unresolved"] = [p.model_dump() for p in problems]

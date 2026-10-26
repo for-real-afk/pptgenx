@@ -28,18 +28,20 @@ LAYOUT_CHOICE = (
     " LAYOUT CHOICE: the outline's layout_hint is only a suggestion. Choose, per slide, the layout and composition that fit the data: "
     "a TABLE or native chart for comparable numbers or a dated sequence, timeline items for events in order, stat callouts for 2-4 "
     "headline numbers, a two-column comparison for two sides, cards or icon rows otherwise. TITLE_ONLY, CHART_COMMENTARY and TABLE are "
-    "all allowed on content slides; slide 1 stays TITLE and the last slide stays CLOSING. Vary layouts across the deck.")
+    "all allowed on content slides; slide 1 stays TITLE and the last slide stays CLOSING. LAYOUT VARIETY: never more than TWO consecutive slides on the same layout (and not the same composition kind three times); use a chart (CHART_COMMENTARY with data_ref), a timeline or a table wherever data sets, dated sequences or comparable items exist for the slide; do not default to cards.")
 
 TITLES = (
     " TITLES AND COHERENCE: every slide title must carry a specific claim or subject (a name, event, number or date); never reuse a generic label "
     "such as 'The peak' or 'The rise' across slides. Do not refer to an event ('the accident', 'the ban') unless an earlier slide explains it or "
-    "this slide states it with its source. The closing slide must not refer to events no earlier slide explains.")
+    "this slide states it with its source. The closing slide must not refer to events no earlier slide explains, and must be forward-looking or a takeaway "
+    "(what it means, what to watch), never a recap of earlier slides.")
 
 HEDGING = (
-    " HEDGING: findings tagged CONTESTED (sources disagree) or REVIEW (one weak source) are not plain fact. Write them with hedged "
-    "wording: 'approximately', 'reportedly', 'according to <source>' or 'sources differ (X vs Y)', never as an unqualified statement, "
-    "and name the sources in speaker_notes. Findings with a higher tier and more independent origins win over weaker ones.")
-
+    " HEDGING: findings tagged CONTESTED (sources disagree) or REVIEW (one weak source) are not plain fact. Hedge a fact on a slide only if it is CENTRAL "
+    "to that slide; a side detail that needs a hedge stays OFF the slide and goes in the speaker notes with its source. A contested central fact gets ONE "
+    "explicit line 'sources differ: X vs Y' ONCE in the whole deck; every later slide uses exactly that wording or leaves the fact out. Use at most 2 hedge "
+    "words ('reportedly', 'approximately', 'according to') per slide. Never put 'reportedly', 'approximately' or any hedge in a slide title or in a table "
+    "cell (put it in the notes, or leave the cell out). Name sources in speaker_notes.")
 
 def stable_prefix(style: str, menu: str, limits: str, facts_text: str = "") -> str:
     return (f"STYLE GUIDE:{NL}{style}{NL}{NL}LAYOUTS:{NL}{menu}{NL}{NL}FIELD LIMITS:{NL}{limits}{NL}{NL}"

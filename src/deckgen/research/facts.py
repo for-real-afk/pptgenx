@@ -1,8 +1,7 @@
 """Facts sheet: built after research and before any slide is written. One structured record per (subject, attribute) that the findings state in
 conflicting ways (dates, numbers, who did what, causes, sequence): the chosen value (the best-weighted source) and status resolved, or
 "sources differ: X vs Y" when the weights tie. Records about the same subject and attribute are merged. Facts that rest on a single weak source
-are listed so the writer hedges them. The writer and the repair pass use only the chosen wording, on every slide, and `facts_problems` is a
-deterministic check that two slides never state different values for the same attribute.
+are listed so the writer hedges them. The writer and the repair pass use only the chosen wording, on every slide.
 Grouping is judged by the checker model; choosing the value is deterministic (tier, independent origins, confidence), never the model's call."""
 from __future__ import annotations
 
@@ -13,17 +12,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from deckgen.llm import LLM
 from deckgen.research.weigh import weight
-from deckgen.schemas import DeckSpec
 from deckgen.schemas.research import Finding
-from deckgen.spec.claims import NUM_RE, name_core, visible_fields
-from deckgen.spec.deck_checks import Problem
 
 NL = chr(10)
 MAX_GROUPS = 30
 MAX_SINGLE = 40
 MERGE_JACCARD = 0.6
 SYSTEM = "You compare factual claims across sources. Output JSON only."
-HEDGE_WORDS = re.compile("(differ|reportedly|according to|approximately|roughly|about|around|estimated)", re.I)
 STOP = {"the", "and", "for", "with", "from", "that", "this", "was", "were", "has", "had", "their", "when", "after", "before", "during"}
 
 
@@ -132,42 +127,3 @@ def build_sheet(llm: LLM, findings: list[Finding]) -> Sheet:
     entries = [e for g in merge_groups(groups.groups[:MAX_GROUPS]) if (e := decide(g, by_id))]
     single = [f"{f.id} ({domain(f.source_url)})" for f in usable if f.needs_review][:MAX_SINGLE]
     return Sheet(entries=entries, single_source=single)
-
-
-# ---- deterministic check: two slides never state different values for the same facts-sheet attribute -------------------------
-def key_tokens(value: str) -> list[str]:
-    nums = [n.replace(",", "").rstrip(".") for n in NUM_RE.findall(value)]
-    names = [name_core(m) for m in re.findall(r"\b[A-Z][\w'-]{2,}(?:\s+[A-Z][\w'-]{2,})*", value)]
-    return [t.lower() for t in nums + names if t]
-
-
-def _states(text: str, entry: Entry, value: str) -> bool:
-    """The slide is about the entry's subject and states this value (all its numbers/names appear)."""
-    subj = _toks(entry.subject)
-    if subj and len(subj & _toks(text)) / len(subj) < 0.5:
-        return False
-    keys = key_tokens(value)
-    t = text.lower().replace(",", "")
-    return bool(keys) and all(k in t for k in keys)
-
-
-def facts_problems(spec: DeckSpec, sheet: Sheet) -> list[Problem]:
-    out: list[Problem] = []
-    texts = {i: " ".join(t for _, t in visible_fields(s)) for i, s in enumerate(spec.slides, 1) if s.layout not in ("SOURCES", "TITLE")}
-    for e in sheet.entries:
-        stated: dict[int, set[str]] = {}
-        for i, t in texts.items():
-            vs = {_norm(v) for v in e.values if _states(t, e, v)}
-            if vs:
-                stated[i] = vs
-        for i, vs in stated.items():
-            wrong = vs - ({_norm(e.value)} if e.status == "resolved" else set())
-            if e.status == "resolved" and wrong and _norm(e.value) not in vs:
-                out.append(Problem(kind="contradiction", slides=[i], description=f"slide {i} states a value for {e.subject} / {e.attribute} that differs from the facts sheet ({e.value})"))
-        idx = sorted(stated)
-        for a in range(len(idx)):
-            for b in range(a + 1, len(idx)):
-                if stated[idx[a]] != stated[idx[b]] and not (stated[idx[a]] <= stated[idx[b]] or stated[idx[b]] <= stated[idx[a]]):
-                    out.append(Problem(kind="contradiction", slides=[idx[a], idx[b]],
-                                       description=f"slides {idx[a]} and {idx[b]} state different values for {e.subject} / {e.attribute}: {sorted(stated[idx[a]])} vs {sorted(stated[idx[b]])}"))
-    return out

@@ -61,24 +61,6 @@ def _facts_sheet(llm, findings, run_dir: Path, ledger, force: int):
     return sheet
 
 
-def _spec_and_repair(llm, brief, outline, findings, brand_dir: Path, run_dir: Path, photos, facts_text, data, sheet, ledger) -> DeckSpec:
-    """Write the deck, then up to two rounds of cross-slide repair (contradictions, unexplained references, title mismatches)."""
-    from deckgen.spec.repair import repair_deck, write_log
-
-    spec = generate_spec(llm, brief, outline, findings, brand_dir, run_dir, photos=photos, facts_text=facts_text, data=data, sheet=sheet)
-    if ledger:
-        ledger.stage = "repair"
-    spec, rep = repair_deck(llm, spec, brief, outline, findings, brand_dir, facts_text, sheet, data)
-    write_log(run_dir / "repair_log.json", rep)
-    notes_path = run_dir / "deck_notes.json"
-    notes = json.loads(notes_path.read_text(encoding="utf-8")) if notes_path.exists() else {}
-    notes.update({"unresolved": rep["unresolved"], "repair": {"before": rep["before"], "after": rep["after"]}})
-    notes_path.write_text(json.dumps(notes, indent=1), encoding="utf-8")
-    if ledger:
-        ledger.stage_line("repair")
-    return spec
-
-
 def _photo_catalog(llm, brief, outline, run_dir: Path, ledger, force: int):
     """Candidate photos per slide from Wikimedia Commons (cached in photos.json). A search failure means no photos, never a failed run."""
     from deckgen.research.photos import Catalog, find_for_outline
@@ -116,6 +98,21 @@ def hedged_claims(spec: DeckSpec) -> int:
     from deckgen.spec.claims import visible_fields
 
     return sum(bool(HEDGE_RE.search(t)) for s in spec.slides for _, t in visible_fields(s))
+
+
+def hedge_stats(spec: DeckSpec) -> dict:
+    """Hedge words per slide (cap 2), and hedging that must not appear: in titles and in table cells."""
+    from deckgen.spec.claims import visible_fields
+
+    per = [sum(len(HEDGE_RE.findall(t)) for _, t in visible_fields(s)) for s in spec.slides]
+    bad = [s.id for s in spec.slides if HEDGE_RE.search(s.title) or (s.table and any(HEDGE_RE.search(c) for r in s.table.rows for c in r))]
+    return {"total_words": sum(per), "max_per_slide": max(per, default=0), "slides_over_cap_2": sum(n > 2 for n in per), "in_title_or_table": bad}
+
+
+def layout_mix(spec: DeckSpec) -> dict:
+    from collections import Counter
+
+    return dict(Counter(f"{s.layout}/{s.composition.kind}" if s.composition else s.layout for s in spec.slides))
 
 
 def photo_status(photos, spec: DeckSpec) -> dict:
@@ -165,7 +162,7 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
     data = None if spec_reused else DataSets(findings.findings, sheet)
     photos = _photo_catalog(llm, brief, outline, run_dir, ledger, force) if CONFIG.photos and not spec_reused else None
     spec = stage("spec", run_dir / "deck_spec.json", DeckSpec,
-                 lambda: _spec_and_repair(llm, brief, outline, findings, brand_dir, run_dir, photos, facts_text, data, sheet, ledger))
+                 lambda: generate_spec(llm, brief, outline, findings, brand_dir, run_dir, photos=photos, facts_text=facts_text, data=data, sheet=sheet))
 
     if photos is not None:  # per-photo status (searches, downloads, failures) is written after the spec stage has used the catalog
         (run_dir / "photos.json").write_text(photos.to_json(), encoding="utf-8")
@@ -232,7 +229,9 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
         "budget": llm.budget_report() if hasattr(llm, "budget_report") else {},
         "models": sorted(tracer.models) if isinstance(tracer, Tracer) else [],
         "photos": photo_status(photos, spec),
-        "cross_slide": deck_notes.get("repair"),
+        "cross_slide": deck_notes.get("cross_check"),
+        "hedging": hedge_stats(spec),
+        "layout_mix": layout_mix(spec),
         "hedged_claims": hedged_claims(spec),
         "pages_read": len(findings.passages),
         "single_low_tier_used": sorted({r for s in spec.slides for r in s.source_refs
@@ -283,7 +282,8 @@ def review_items(spec: DeckSpec, by_id: dict, notes: dict, findings_obj=None) ->
     for w in notes.get("warnings", []):
         grouped.setdefault(w["check"], []).append(w)
     out += [f"warning [{c}] x{len(ws)} (outline slides {sorted({w['outline_slide'] for w in ws})}): {ws[0]['message'][:120]}" for c, ws in grouped.items()]
-    out += [f"unresolved cross-slide problem on slides {p['slides']}: {p['description']}" for p in notes.get("unresolved", [])]
+    out += [f"cross-slide {p['kind']} on slides {p['slides']}: {p['description']}" + "".join(f' | slide {q["slide"]}: "{q["text"]}"' for q in p.get("quotes", []))
+            for p in notes.get("unresolved", [])]
     return out
 
 
@@ -340,7 +340,8 @@ def report_md(r: dict) -> str:
     ph = r.get("photos", {})
     rows = [f"# Run report: {r['run_id']}", "", f"Topic: {r['topic']}", ""] + ([f"**PHOTOS: {ph['status']}; {ph.get('searches', 0)} searches, {ph.get('offered', 0)} candidates, "
             f"{ph.get('placed', 0)} placed. " + " | ".join(ph.get("errors", []))[:400] + "**", ""] if ph and (ph.get("errors") or ph.get("placed", 0) == 0) else []) + [""] + [
-            f"- cross-slide problems (before -> after repair): {(r.get('cross_slide') or {}).get('before')} -> {(r.get('cross_slide') or {}).get('after')}",
+            f"- cross-slide check (one LLM pass): {r.get('cross_slide')}",
+            f"- hedging: {r.get('hedging')}; layout mix: {r.get('layout_mix')}",
             f"- pages read: {r['pages_read']}; hedged claims on slides: {r['hedged_claims']}; findings on slides resting on a single low-tier source: {len(r['single_low_tier_used'])}",
             f"- slides: {r['slides']}; findings: {r['findings']} ({r['findings_used']} used)",
             f"- research: {r['research_stats']}", f"- stage seconds: {r['stage_seconds']}",
