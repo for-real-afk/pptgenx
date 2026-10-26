@@ -82,9 +82,18 @@ class Config:
     whole_deck: bool = os.environ.get("DECKGEN_WHOLE_DECK", "1") == "1"                      # one call writes the whole deck; per-slide writing only repairs hard failures
     hedge_contested: bool = os.environ.get("DECKGEN_HEDGE_CONTESTED", "1") == "1"            # equal-weight conflicts are hedged on the slide, not dropped
     # single-agent loop (v2)
-    agent_budget_usd: float = _float("DECKGEN_AGENT_BUDGET_USD", 8.0)      # per run, inside the overall account cap
-    agent_max_tool_calls: int = _int("DECKGEN_AGENT_MAX_TOOL_CALLS", 150)
-    agent_max_seconds: int = _int("DECKGEN_AGENT_MAX_SECONDS", 2400)
+    agent_budget_usd: float = _float("DECKGEN_AGENT_BUDGET_USD", 12.0)     # per run, inside the overall account cap
+    agent_account_cap_usd: float = _float("DECKGEN_ACCOUNT_CAP_USD", 25.0)  # all runs together (summed from runs/*/usage.jsonl)
+    agent_max_tool_calls: int = _int("DECKGEN_AGENT_MAX_TOOL_CALLS", 200)
+    agent_max_seconds: int = _int("DECKGEN_AGENT_MAX_SECONDS", 3000)
+    # budget split per phase (fractions of the run budget): research and writing are capped, look-and-fix gets the rest, a reserve is never spent on turns
+    agent_research_frac: float = _float("DECKGEN_AGENT_RESEARCH_FRAC", 0.25)
+    agent_write_frac: float = _float("DECKGEN_AGENT_WRITE_FRAC", 0.35)
+    agent_look_min_frac: float = _float("DECKGEN_AGENT_LOOK_MIN_FRAC", 0.30)
+    agent_reserve_frac: float = _float("DECKGEN_AGENT_RESERVE_FRAC", 0.10)
+    agent_max_pages: int = _int("DECKGEN_AGENT_MAX_PAGES", 12)            # hard cap on pages fetched
+    agent_free_pages: int = _int("DECKGEN_AGENT_FREE_PAGES", 5)           # pages that need no named gap; later ones do
+    agent_max_slide_rounds: int = _int("DECKGEN_AGENT_MAX_SLIDE_ROUNDS", 3)  # render-and-fix rounds per slide after its first view
     # QA
     qa_max_rounds: int = 3
     soffice_timeout: int = 120

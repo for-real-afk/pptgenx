@@ -9,7 +9,7 @@ from pathlib import Path
 import typer
 
 from deckgen.config import CONFIG
-from deckgen.ledger import BudgetAbort
+from deckgen.ledger import BudgetAbort, Ledger
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 brand_app = typer.Typer(no_args_is_help=True)
@@ -166,6 +166,13 @@ def agent(topic: str = typer.Option(..., help="deck topic"), audience: str = typ
     if est["upper_usd"] > cap:
         typer.echo("STOP: the upper estimate is over the budget. Raise --budget, lower DECKGEN_AGENT_MAX_TOOL_CALLS, or confirm you accept the budget guard stopping the run.")
         if not estimate_only and not typer.confirm("Run anyway (the guard still stops at the budget)?", default=False):
+            raise typer.Exit(EXIT_ESTIMATE_TOO_HIGH)
+    spent = Ledger.account_spent(CONFIG.runs_dir)
+    left = CONFIG.agent_account_cap_usd - spent
+    typer.echo(f"account: ${spent:.2f} spent across all runs of ${CONFIG.agent_account_cap_usd:.2f}; ${left:.2f} left")
+    if left < cap:
+        typer.echo(f"STOP: this run's budget (${cap}) is more than the ${left:.2f} left under the account cap. Lower --budget or raise DECKGEN_ACCOUNT_CAP_USD on purpose.")
+        if not estimate_only and not typer.confirm("Run anyway?", default=False):
             raise typer.Exit(EXIT_ESTIMATE_TOO_HIGH)
     if estimate_only:
         raise typer.Exit(0)

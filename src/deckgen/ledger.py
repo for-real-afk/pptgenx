@@ -98,12 +98,12 @@ class Ledger:
 
     # -- recording -------------------------------------------------------------------------------------------------
     def record(self, *, role: str, llm_stage: str, model: str, tin: int, tout: int, cw: int = 0, cr: int = 0, latency_s: float = 0.0,
-               cache: str = "miss", retry: int = 1, outcome: str = "ok", saved_usd: float = 0.0, error: str = "") -> float:
+               cache: str = "miss", retry: int = 1, outcome: str = "ok", saved_usd: float = 0.0, error: str = "", context_tokens: int = 0) -> float:
         usd = 0.0 if cache == "hit" else self.cost(model, tin, tout, cw, cr)
         self.total += usd
         row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "pipeline_stage": self.stage, "role": role, "stage": llm_stage, "model": model,
                "input_tokens": tin, "output_tokens": tout, "cache_write_tokens": cw, "cache_read_tokens": cr, "cost_usd": round(usd, 6),
-               "latency_s": round(latency_s, 2), "cache": cache, "retry": retry, "outcome": outcome, "saved_usd": round(saved_usd, 6), "error": error,
+               "latency_s": round(latency_s, 2), "cache": cache, "retry": retry, "outcome": outcome, "saved_usd": round(saved_usd, 6), "error": error, "context_tokens": context_tokens,
                "running_total_usd": round(self.total, 6)}
         self.rows.append(row)
         if self.path:
@@ -126,6 +126,26 @@ class Ledger:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(row) + chr(10))
+
+    def spent(self, stage: str) -> float:
+        """Money spent so far on model calls made while `pipeline_stage` was `stage`."""
+        return sum(r["cost_usd"] for r in self.rows if r["pipeline_stage"] == stage and r["role"] != "tool")
+
+    @staticmethod
+    def account_spent(runs_dir: Path) -> float:
+        """Total cost recorded in every run's usage.jsonl. Repair and fix-pass runs copy their source run's rows, so identical rows count once."""
+        seen: set[tuple] = set()
+        total = 0.0
+        for f in runs_dir.glob("*/usage.jsonl"):
+            for line in f.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                r = json.loads(line)
+                key = (r.get("ts"), r.get("stage"), r.get("model"), r.get("input_tokens"), r.get("output_tokens"), r.get("cost_usd"), r.get("latency_s"))
+                if key not in seen and r.get("cache") != "hit":
+                    seen.add(key)
+                    total += r.get("cost_usd", 0.0)
+        return total
 
     # -- reporting -------------------------------------------------------------------------------------------------
     def stage_line(self, name: str) -> str:

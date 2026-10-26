@@ -11,6 +11,7 @@ import time
 
 import httpx
 
+from deckgen.agent.phases import WRAPUP_TURNS
 from deckgen.providers.base import ProviderUnavailable
 
 NL = chr(10)
@@ -99,12 +100,9 @@ def trim(messages: list[dict], names: dict[str, str]) -> list[dict]:
 
 
 class AgentLoop:
-    PHASE = {"search": "research", "fetch_page": "research", "read_source": "research", "summarize_sources": "research", "write_file": "plan_write",
-             "read_file": "plan_write", "validate_spec": "plan_write", "build_deck": "look_and_fix", "render_slides": "look_and_fix", "finish": "finish"}
-
-    def __init__(self, tools, ledger, *, model: str, system_text: str, tool_defs: list[dict], max_calls: int, max_seconds: int,
+    def __init__(self, tools, ledger, phases, *, model: str, system_text: str, tool_defs: list[dict], max_calls: int, max_seconds: int,
                  transport=anthropic_transport, approval=None):
-        self.tools, self.ledger, self.model, self.transport, self.approval = tools, ledger, model, transport, approval
+        self.tools, self.ledger, self.phases, self.model, self.transport, self.approval = tools, ledger, phases, model, transport, approval
         self.max_calls, self.max_seconds = max_calls, max_seconds
         self.system = [{"type": "text", "text": system_text, "cache_control": {"type": "ephemeral"}}]
         self.tool_defs = copy.deepcopy(tool_defs)
@@ -114,7 +112,7 @@ class AgentLoop:
         self.tool_calls = 0
         self.model_calls = 0
         self.stop_reason = ""
-        self.phase = "research"
+        self.wrapup_turns = 0
 
     def _body(self) -> dict:
         msgs = trim(self.messages, self.names)
@@ -130,7 +128,7 @@ class AgentLoop:
     def _turn(self) -> dict:
         body = self._body()
         sys_text, msg_text, images = flatten(self.system, self.tool_defs, body["messages"])
-        self.ledger.stage = self.phase
+        self.ledger.stage = self.phases.phase
         self.ledger.check(self.model, sys_text, msg_text, MAX_TOKENS, images)         # raises BudgetAbort before any spend that could pass the cap
         t0 = time.time()
         try:
@@ -143,7 +141,8 @@ class AgentLoop:
         self.model_calls += 1
         self.ledger.record(role="agent", llm_stage="agent_turn", model=self.model, tin=u.get("input_tokens", 0), tout=u.get("output_tokens", 0),
                            cw=u.get("cache_creation_input_tokens", 0) or 0, cr=u.get("cache_read_input_tokens", 0) or 0, latency_s=time.time() - t0,
-                           cache="miss", outcome="ok" if resp.get("stop_reason") != "max_tokens" else "truncated")
+                           cache="miss", outcome="ok" if resp.get("stop_reason") != "max_tokens" else "truncated",
+                           context_tokens=u.get("input_tokens", 0) + (u.get("cache_creation_input_tokens", 0) or 0) + (u.get("cache_read_input_tokens", 0) or 0))
         return resp
 
     def run(self, task: str) -> dict:
@@ -159,6 +158,11 @@ class AgentLoop:
             if time.time() - t_start > self.max_seconds:
                 self.stop_reason = f"wall clock limit ({self.max_seconds}s)"
                 break
+            if self.phases.phase == "wrapup":
+                self.wrapup_turns += 1
+                if self.wrapup_turns > WRAPUP_TURNS:
+                    self.stop_reason = "the agent did not finish within the wrap-up turns"
+                    break
             resp = self._turn()
             content = resp.get("content", [])
             truncated = resp.get("stop_reason") == "max_tokens"
@@ -181,8 +185,11 @@ class AgentLoop:
                 self.names[b["id"]] = b["name"]
                 self.tool_calls += 1
                 out, is_err = self.tools.call(b["name"], b.get("input", {}))
-                self.phase = self.PHASE.get(b["name"], self.phase)
                 results.append({"type": "tool_result", "tool_use_id": b["id"], "content": out, **({"is_error": True} if is_err else {})})
+            for note in self.phases.review(self.ledger):          # a phase that used its money ends here and hands over
+                results.append({"type": "text", "text": note})
+            if self.phases.phase == "wrapup":
+                self.tools.start_wrapup()
             self.messages.append({"role": "user", "content": results})
         if self.tools.finished and self.stop_reason == "finished":
             return {"stop_reason": "finished", "tool_calls": self.tool_calls, "model_calls": self.model_calls, "seconds": round(time.time() - t_start)}

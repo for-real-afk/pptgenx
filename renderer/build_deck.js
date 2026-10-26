@@ -41,13 +41,13 @@ function verifySpec(spec, manifest) {
 const asRuns = (v, space = 14) =>
   Array.isArray(v) ? v.map((t, i) => ({ text: t, options: { bullet: true, breakLine: i < v.length - 1, paraSpaceAfter: space } })) : v;
 
-function addChart(slide, pres, theme, c) {
+function addChart(slide, pres, theme, c, rect) {
   const hex = (k) => theme.colors[k];
   const multi = c.series.length > 1 || c.type === "pie" || c.type === "doughnut";
   const data = c.series.map((s) => ({ name: s.name, labels: c.categories, values: s.values }));
   const t = CHART_TYPES[c.type];
   const opts = {
-    placeholder: "chart",
+    ...(rect ? { x: rect.x, y: rect.y, w: rect.w, h: rect.h } : { placeholder: "chart" }),
     showTitle: true, title: c.title, titleFontFace: CHART_FONT, titleFontSize: 14, titleColor: hex("dk2"),
     showValue: true, dataLabelFontFace: CHART_FONT, dataLabelFontSize: 12, dataLabelColor: hex("dk1"),
     dataLabelPosition: t === "line" ? "t" : t === "bar" ? "outEnd" : "bestFit",
@@ -69,24 +69,30 @@ function addChart(slide, pres, theme, c) {
   slide.addChart(pres.charts[t.toUpperCase()], data, opts);
 }
 
-function addTable(slide, C, tbl) {
+function addTable(slide, C, tbl, rect) {
+  const r = rect || { x: MARGIN, y: CONTENT.y, w: W - 2 * MARGIN, h: CONTENT.h };
   const hdr = tbl.header.map((h) => ({ text: h, options: { bold: true, color: C.background1, fill: { color: C.accent1 }, fontSize: 14 } }));
   const body = tbl.rows.map((r, ri) => r.map((c) => ({ text: String(c), options: { fontSize: 14, color: C.text1, fill: { color: ri % 2 ? C.background2 : C.background1 } } })));
   slide.addTable([hdr, ...body], {
-    placeholder: "table", x: MARGIN, y: CONTENT.y, w: W - 2 * MARGIN, autoPageSlideStartY: CONTENT.y,
-    border: { type: "solid", pt: 0.5, color: "D0D5DD" }, margin: [0.1, 0.15, 0.1, 0.15], valign: "middle", rowH: Math.min(0.85, CONTENT.h / (tbl.rows.length + 1)),
+    ...(rect ? {} : { placeholder: "table" }), x: r.x, y: r.y, w: r.w, autoPageSlideStartY: r.y,
+    border: { type: "solid", pt: 0.5, color: "D0D5DD" }, margin: [0.1, 0.15, 0.1, 0.15], valign: "middle", rowH: Math.min(0.85, r.h / (tbl.rows.length + 1)),
   });
 }
 
-async function buildDeck(spec, brandDir, outFile) {
+/** A presentation with the brand frame applied: wide layout, theme fonts, every named master defined. */
+async function newDeck(brandDir, title, motifIcon) {
   const { theme, layouts, manifest } = loadBrand(brandDir);
-  verifySpec(spec, manifest);
   const pres = new pptxgen();
   pres.layout = "LAYOUT_WIDE";
   pres.theme = { headFontFace: theme.headFontFace, bodyFontFace: theme.bodyFontFace };
-  pres.title = spec.title;
-  const C = pres.SchemeColor;
-  await layouts.defineAll(pres, theme, spec.motif_icon);
+  pres.title = title;
+  await layouts.defineAll(pres, theme, motifIcon);
+  return { pres, C: pres.SchemeColor, theme, layouts, manifest };
+}
+
+async function buildDeck(spec, brandDir, outFile) {
+  const { pres, C, theme, layouts, manifest } = await newDeck(brandDir, spec.title, spec.motif_icon);
+  verifySpec(spec, manifest);
 
   const manifestDark = Object.fromEntries(manifest.layouts.map((l) => [l.name, l.dark]));
   let section = null;
@@ -119,4 +125,4 @@ if (require.main === module) {
     .then(() => console.log(`wrote ${out}`))
     .catch((e) => { console.error(e.message); process.exit(1); });
 }
-module.exports = { buildDeck, verifySpec };
+module.exports = { buildDeck, verifySpec, newDeck, addChart, addTable };
