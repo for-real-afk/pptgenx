@@ -10,6 +10,7 @@ import hashlib
 import json
 import time
 from collections import deque
+import dataclasses
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol, TypeVar
@@ -26,7 +27,7 @@ NL = chr(10)
 ROLES = ("extractor", "writer", "checker", "critic")
 STAGE_ROLE = {
     "plan": "extractor", "outline": "writer", "spec_slide": "writer", "spec_fallback_labels": "writer", "fixer": "writer",
-    "research_query": "extractor", "research_extract": "extractor", "image_queries": "extractor", "facts_sheet": "checker",
+    "research_query": "extractor", "research_extract": "extractor", "image_queries": "extractor", "facts_sheet": "checker", "spec_deck": "writer",
     "research_crosscheck": "checker", "research_conflict_pairs": "checker", "faithfulness": "checker", "deck_consistency": "checker",
     "critic": "critic", "critic_consistency": "critic",
 }
@@ -42,7 +43,7 @@ class QuotaExhausted(RuntimeError):
 
 class LLM(Protocol):
     def generate(self, *, stage: str, system: str, prompt: str, schema: type[T],
-                 images: list[Path] | None = None, vision: bool = False, cache_prefix: str = "") -> T: ...
+                 images: list[Path] | None = None, vision: bool = False, cache_prefix: str = "", max_tokens: int | None = None) -> T: ...
 
 
 @dataclass
@@ -220,9 +221,11 @@ class RoleLLM:
         except Exception:  # noqa: BLE001 - savings are informational; a missing price must not break a cache hit
             return 0.0
 
-    def generate(self, *, stage, system, prompt, schema, images=None, vision=False, cache_prefix=""):
+    def generate(self, *, stage, system, prompt, schema, images=None, vision=False, cache_prefix="", max_tokens=None):
         role = STAGE_ROLE.get(stage) or ("critic" if (images or vision) else "writer")
         spec = self.roles[role]
+        if max_tokens:  # a stage that must return a whole deck needs more room than the per-role default
+            spec = dataclasses.replace(spec, max_tokens=max_tokens)
         full = f"{prompt}{NL}{NL}Respond with JSON only, matching this JSON Schema:{NL}{json.dumps(schema.model_json_schema())}"
         candidates = [(spec.provider, spec.model)] + ([] if CONFIG.pin_models else list(spec.fallbacks))
         last = None
@@ -315,7 +318,7 @@ class FakeLLM:
     def __init__(self, scripts: dict):
         self.scripts, self.calls = scripts, []
 
-    def generate(self, *, stage, system, prompt, schema, images=None, vision=False, cache_prefix=""):
+    def generate(self, *, stage, system, prompt, schema, images=None, vision=False, cache_prefix="", max_tokens=None):
         prompt = cache_prefix + prompt
         self.calls.append({"stage": stage, "prompt": prompt, "images": images, "system": system})
         s = self.scripts[stage]

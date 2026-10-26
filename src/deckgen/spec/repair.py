@@ -1,6 +1,8 @@
 """Repair pass on a finished deck: take the cross-slide checker's problems (contradictions, unexplained references, titles that promise more than the
-slide shows) and fix them with small diffs (the same fixer as the per-slide loop: shorter text, deleted items, never more words), using the facts sheet
-as the one authoritative wording. The checker is re-run after each round; stop when no contradiction is left or after MAX_ROUNDS."""
+slide shows) and fix them, using the facts sheet as the one authoritative wording.
+  contradiction / unclear_reference: small diffs (the same fixer as the per-slide loop) that may add up to GROWTH words per slide, only for the fix.
+  title_mismatch: the slide is rewritten (a chart slide included; its chart data is rebuilt by code from the findings).
+The checker (plus the deterministic facts-sheet check) is re-run after each round; stop when no contradiction is left or after MAX_ROUNDS."""
 from __future__ import annotations
 
 import json
@@ -11,16 +13,15 @@ from deckgen.schemas import DeckSpec, SlideSpec
 from deckgen.schemas.research import Brief, Findings, Outline
 from deckgen.spec.deck_checks import Problem
 from deckgen.spec.edit_loop import apply as apply_spec_edits
-from deckgen.spec.edit_loop import check_all, propose, score
-from deckgen.spec.spec_generator import _deck_problems, pool_listing
+from deckgen.spec.edit_loop import check_all, edit_loop, propose, score
+from deckgen.spec.spec_generator import SpecGenerationError, _deck_problems, pool_listing, slide_source_text, write_slide
 from deckgen.spec.validate_spec import load_manifest
-from deckgen.spec.violations import Violation
+from deckgen.spec.violations import Violation, hard
 
 MAX_ROUNDS = 2
+GROWTH = 6
 FIXABLE = ("contradiction", "unclear_reference", "title_mismatch")
 NO_EDIT = ("TITLE", "SOURCES")
-CHART_HINT = (" The slide has a chart: show ONE value per subject (delete the duplicate categories AND the value at the same index in every series), "
-              "take the value from the facts sheet, and replace the chart title with a shorter one that names the source.")
 
 
 def counts(problems: list[Problem]) -> dict[str, int]:
@@ -36,8 +37,18 @@ def _targets(p: Problem, slides: list[SlideSpec]) -> list[int]:
     return ns if p.kind == "contradiction" else ns[-1:]
 
 
-def repair_round(llm: LLM, slides: list[SlideSpec], problems: list[Problem], by_id: dict, manifest: dict, deck_title: str, brand: str,
-                 facts_text: str, passages: dict) -> tuple[list[SlideSpec], list[dict]]:
+def _rewrite(llm, s: SlideSpec, n: int, slides, problem: Violation, by_id, manifest, brief, outline, brand_dir, findings, facts_text, data) -> SlideSpec | None:
+    """Full rewrite of one slide whose title does not match its body. Needs the outline slide with the same number."""
+    if len(outline.slides) != len(slides) - 1 or n > len(outline.slides):
+        return None
+    o = outline.slides[n - 1]
+    new = write_slide(llm, brief, o, outline, by_id, brand_dir, slides[:n - 1], n == len(outline.slides), [problem.message], passages=findings.passages,
+                      facts_text=facts_text, data=data)
+    return new.model_copy(update={"id": s.id, "section": s.section})
+
+
+def repair_round(llm: LLM, slides: list[SlideSpec], problems: list[Problem], ctx: dict) -> tuple[list[SlideSpec], list[dict]]:
+    by_id, manifest, findings = ctx["by_id"], ctx["manifest"], ctx["findings"]
     log: list[dict] = []
     slides = list(slides)
     for p in problems:
@@ -45,41 +56,49 @@ def repair_round(llm: LLM, slides: list[SlideSpec], problems: list[Problem], by_
             continue
         for n in _targets(p, slides):
             s = slides[n - 1]
-            hint = CHART_HINT if s.chart else ""
-            urls = sorted({by_id[r].source_url for r in s.source_refs if r in by_id})
-            src = " ".join(x for u in urls for x in passages.get(u, [])[:2])[:5000]
-            base = check_all(llm, s, by_id, slides[:n - 1], manifest, deck_title, brand, faith=False, source_text=src)
+            src = slide_source_text(ctx["outline"].slides[n - 1], by_id, findings.passages) if n <= len(ctx["outline"].slides) else ""
+            base = check_all(llm, s, by_id, slides[:n - 1], manifest, ctx["deck_title"], ctx["brand"], faith=False, source_text=src)
             problem = Violation("deck_contradiction" if p.kind != "unclear_reference" else "deck_unclear_reference",
                                 f"{p.kind} involving slide(s) {p.slides}: {p.description}. Resolve it on THIS slide using only the findings and the facts sheet; "
-                                f"where the sheet says sources differ, say so in the slide's own words. Do not add words.{hint}", "hard")
+                                f"where the sheet says sources differ, say so in the slide's own words.", "hard")
             entry = {"problem": p.kind, "slides": p.slides, "target": n, "description": p.description[:200]}
             try:
-                edits = propose(llm, s, base + [problem], by_id, pool_listing(by_id, 40), src, facts_text)
-                cand = apply_spec_edits(s, edits, by_id)
-                after = check_all(llm, cand, by_id, slides[:n - 1], manifest, deck_title, brand, faith=False, source_text=src)
+                if p.kind == "title_mismatch":
+                    cand = _rewrite(llm, s, n, slides, problem, by_id, manifest, ctx["brief"], ctx["outline"], ctx["brand_dir"], findings, ctx["facts_text"], ctx["data"])
+                    if cand is None:
+                        entry["result"] = "no change (no matching outline slide to rewrite from)"
+                        log.append(entry)
+                        continue
+                    entry["mode"] = "rewrite"
+                else:
+                    edits = propose(llm, s, base + [problem], by_id, pool_listing(by_id, 40), src, ctx["facts_text"], allow_growth=GROWTH)
+                    cand = apply_spec_edits(s, edits, by_id, allow_growth=GROWTH)
+                    entry["mode"] = "diff"
+                after = check_all(llm, cand, by_id, slides[:n - 1], manifest, ctx["deck_title"], ctx["brand"], faith=False, source_text=src)
                 if cand != s and score(after) <= score(base):
                     slides[n - 1] = cand
                     entry["result"] = "edited"
                 else:
                     entry["result"] = "no change (proposal empty or made the slide worse)"
-            except Exception as e:  # noqa: BLE001 - one failed repair keeps the slide as it was; the problem stays listed
+            except (SpecGenerationError, Exception) as e:  # noqa: BLE001 - one failed repair keeps the slide as it was; the problem stays listed
                 entry["result"] = f"rejected: {str(e)[:120]}"
             log.append(entry)
     return slides, log
 
 
 def repair_deck(llm: LLM, spec: DeckSpec, brief: Brief, outline: Outline, findings: Findings, brand_dir: Path, facts_text: str,
-                rounds: int = MAX_ROUNDS) -> tuple[DeckSpec, dict]:
+                sheet=None, data=None, rounds: int = MAX_ROUNDS) -> tuple[DeckSpec, dict]:
     by_id = {f.id: f for f in findings.findings if not f.excluded}
-    manifest = load_manifest(brand_dir)
+    ctx = {"by_id": by_id, "manifest": load_manifest(brand_dir), "findings": findings, "outline": outline, "brief": brief, "brand_dir": brand_dir,
+           "facts_text": facts_text, "data": data, "deck_title": spec.title, "brand": spec.brand}
     slides = list(spec.slides)
-    problems = _deck_problems(llm, slides, brief, outline, by_id)
+    problems = _deck_problems(llm, slides, brief, outline, by_id, sheet)
     report = {"before": counts(problems), "rounds": [], "problems_before": [p.model_dump() for p in problems]}
     for r in range(1, rounds + 1):
         if not any(p.kind == "contradiction" for p in problems):
             break
-        slides, log = repair_round(llm, slides, problems, by_id, manifest, spec.title, spec.brand, facts_text, findings.passages)
-        problems = _deck_problems(llm, slides, brief, outline, by_id)
+        slides, log = repair_round(llm, slides, problems, ctx)
+        problems = _deck_problems(llm, slides, brief, outline, by_id, sheet)
         report["rounds"].append({"round": r, "edits": log, "after": counts(problems)})
     report["after"] = counts(problems)
     report["unresolved"] = [p.model_dump() for p in problems]

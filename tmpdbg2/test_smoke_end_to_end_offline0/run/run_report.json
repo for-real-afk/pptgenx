@@ -1,0 +1,113 @@
+{
+ "coverage": {
+  "question 0": "covered by slides [2, 4]",
+  "question 1": "dropped: 2 findings exist but the outline did not use them within 4 slides",
+  "question 2": "covered by slides [3]",
+  "question 3": "dropped: 2 findings exist but the outline did not use them within 4 slides"
+ },
+ "quality": {
+  "slides_built": 5,
+  "slides_requested": 6,
+  "specificity": 1.0,
+  "distinct_evidence": 1.0
+ },
+ "review_before_use": [
+  "slide dropped [model] (Power): slide 3: the writer produced no usable slide: ['your output could not be used (a chart must use data_ref, one of none (no chart data exists:"
+ ],
+ "shortfall": {
+  "requested": 6,
+  "built": 5,
+  "dropped_by_category": {
+   "model": 1
+  },
+  "deleted_as_redundant": 0,
+  "warnings": 0
+ },
+ "gate_profile": "demoted",
+ "fallback_slides": 0,
+ "redundancy": {
+  "unresolved": 0,
+  "deleted": 0
+ },
+ "deck_problems_unresolved": [],
+ "deck_problems_repaired_slides": [],
+ "run_id": "run",
+ "topic": "Group B",
+ "slides": 5,
+ "findings": 8,
+ "findings_used": 4,
+ "research_stats": {
+  "tool_calls": 12,
+  "pages": 0,
+  "api_calls": 4,
+  "cache_hits": 8,
+  "flagged_pages": 0,
+  "questions": 4,
+  "rounds": 3,
+  "followup_questions": 8,
+  "stopped_early": 0,
+  "raw_findings": 8,
+  "findings": 8,
+  "usable": 8,
+  "excluded": 0,
+  "conflicts": 0,
+  "origins": 2,
+  "needs_review": 0,
+  "tier0": 0,
+  "tier1": 8,
+  "tier2": 0,
+  "tier3": 0,
+  "tier4": 0
+ },
+ "stage_seconds": {
+  "plan": 0.0,
+  "research": 0.1,
+  "outline": 0.0,
+  "spec": 0.1,
+  "qa": 20.1
+ },
+ "file_errors": [],
+ "images": 5,
+ "render_error": null,
+ "deck": "D:\\projects\\deckgen\\tmpdbg2\\test_smoke_end_to_end_offline0\\run\\deck.pptx",
+ "unsourced_slides": [],
+ "invalid_layouts": [],
+ "first_attempt_rate": {
+  "spec_slide_valid": 1.0
+ },
+ "llm": "0 LLM calls (0 from cache), 0 tokens in, 0 tokens out",
+ "roles": {},
+ "budget": {},
+ "models": [],
+ "photos": {
+  "status": "problems",
+  "searches": 0,
+  "offered": 0,
+  "placed": 0,
+  "errors": [
+   "photos: SKIPPED, DECKGEN_CONTACT is not set (Wikimedia requires a contact in the User-Agent)"
+  ]
+ },
+ "cross_slide": {
+  "before": {},
+  "after": {}
+ },
+ "hedged_claims": 0,
+ "pages_read": 8,
+ "single_low_tier_used": [],
+ "cost": null,
+ "outline_auto_approved": true,
+ "qa_stopped": "no blocking issues",
+ "qa_blocking_remaining": 0,
+ "qa_rounds": [
+  {
+   "round": 0,
+   "action": "initial inspection",
+   "accepted": true,
+   "score": [
+    0,
+    0
+   ]
+  }
+ ]
+}

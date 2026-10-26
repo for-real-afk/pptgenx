@@ -21,6 +21,7 @@ from deckgen.schemas import DeckSpec
 from deckgen.schemas.qa import QAReport
 from deckgen.schemas.research import Brief, Findings, Outline
 from deckgen.spec.deck_checks import coverage
+from deckgen.research.datasets import DataSets
 from deckgen.spec.spec_generator import domain, generate_spec
 
 STAGES = ["plan", "research", "outline", "spec", "qa", "report"]
@@ -44,20 +45,38 @@ def _write(path: Path, model) -> None:
     path.write_text(model.model_dump_json(exclude_none=True, indent=1), encoding="utf-8")
 
 
-def _facts_text(llm, findings, run_dir: Path, ledger, force: int) -> str:
+def _facts_sheet(llm, findings, run_dir: Path, ledger, force: int):
     """The facts sheet (facts.json, cached): one wording per conflicting fact, hedges for single-source ones. Built once, before the writer."""
     from deckgen.research.facts import Sheet, build_sheet
 
     path = run_dir / "facts.json"
     if path.exists() and STAGES.index("spec") < force:
-        return Sheet.model_validate_json(path.read_text(encoding="utf-8")).text()
+        return Sheet.model_validate_json(path.read_text(encoding="utf-8"))
     if ledger:
         ledger.stage = "facts"
     sheet = build_sheet(llm, findings.findings)
     path.write_text(sheet.model_dump_json(indent=1), encoding="utf-8")
     if ledger:
         ledger.stage_line("facts")
-    return sheet.text()
+    return sheet
+
+
+def _spec_and_repair(llm, brief, outline, findings, brand_dir: Path, run_dir: Path, photos, facts_text, data, sheet, ledger) -> DeckSpec:
+    """Write the deck, then up to two rounds of cross-slide repair (contradictions, unexplained references, title mismatches)."""
+    from deckgen.spec.repair import repair_deck, write_log
+
+    spec = generate_spec(llm, brief, outline, findings, brand_dir, run_dir, photos=photos, facts_text=facts_text, data=data, sheet=sheet)
+    if ledger:
+        ledger.stage = "repair"
+    spec, rep = repair_deck(llm, spec, brief, outline, findings, brand_dir, facts_text, sheet, data)
+    write_log(run_dir / "repair_log.json", rep)
+    notes_path = run_dir / "deck_notes.json"
+    notes = json.loads(notes_path.read_text(encoding="utf-8")) if notes_path.exists() else {}
+    notes.update({"unresolved": rep["unresolved"], "repair": {"before": rep["before"], "after": rep["after"]}})
+    notes_path.write_text(json.dumps(notes, indent=1), encoding="utf-8")
+    if ledger:
+        ledger.stage_line("repair")
+    return spec
 
 
 def _photo_catalog(llm, brief, outline, run_dir: Path, ledger, force: int):
@@ -141,9 +160,12 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
     outline = stage("outline", run_dir / "outline.json", Outline, lambda: outliner.approve(
         outliner.outline(llm, brief, findings), brief, ids, run_dir / "outline.json", auto_approve, confirm, edit))
     spec_reused = (run_dir / "deck_spec.json").exists() and STAGES.index("spec") < force   # a repaired/resumed spec needs neither facts nor photos
-    facts_text = "" if spec_reused else _facts_text(llm, findings, run_dir, ledger, force)
+    sheet = None if spec_reused else _facts_sheet(llm, findings, run_dir, ledger, force)
+    facts_text = sheet.text() if sheet else ""
+    data = None if spec_reused else DataSets(findings.findings, sheet)
     photos = _photo_catalog(llm, brief, outline, run_dir, ledger, force) if CONFIG.photos and not spec_reused else None
-    spec = stage("spec", run_dir / "deck_spec.json", DeckSpec, lambda: generate_spec(llm, brief, outline, findings, brand_dir, run_dir, photos=photos, facts_text=facts_text))
+    spec = stage("spec", run_dir / "deck_spec.json", DeckSpec,
+                 lambda: _spec_and_repair(llm, brief, outline, findings, brand_dir, run_dir, photos, facts_text, data, sheet, ledger))
 
     if photos is not None:  # per-photo status (searches, downloads, failures) is written after the spec stage has used the catalog
         (run_dir / "photos.json").write_text(photos.to_json(), encoding="utf-8")
@@ -210,6 +232,7 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
         "budget": llm.budget_report() if hasattr(llm, "budget_report") else {},
         "models": sorted(tracer.models) if isinstance(tracer, Tracer) else [],
         "photos": photo_status(photos, spec),
+        "cross_slide": deck_notes.get("repair"),
         "hedged_claims": hedged_claims(spec),
         "pages_read": len(findings.passages),
         "single_low_tier_used": sorted({r for s in spec.slides for r in s.source_refs
@@ -317,6 +340,7 @@ def report_md(r: dict) -> str:
     ph = r.get("photos", {})
     rows = [f"# Run report: {r['run_id']}", "", f"Topic: {r['topic']}", ""] + ([f"**PHOTOS: {ph['status']}; {ph.get('searches', 0)} searches, {ph.get('offered', 0)} candidates, "
             f"{ph.get('placed', 0)} placed. " + " | ".join(ph.get("errors", []))[:400] + "**", ""] if ph and (ph.get("errors") or ph.get("placed", 0) == 0) else []) + [""] + [
+            f"- cross-slide problems (before -> after repair): {(r.get('cross_slide') or {}).get('before')} -> {(r.get('cross_slide') or {}).get('after')}",
             f"- pages read: {r['pages_read']}; hedged claims on slides: {r['hedged_claims']}; findings on slides resting on a single low-tier source: {len(r['single_low_tier_used'])}",
             f"- slides: {r['slides']}; findings: {r['findings']} ({r['findings_used']} used)",
             f"- research: {r['research_stats']}", f"- stage seconds: {r['stage_seconds']}",

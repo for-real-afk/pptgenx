@@ -12,6 +12,7 @@ from deckgen.llm import LLM
 from deckgen.schemas import SlideSpec
 from deckgen.schemas.research import Finding
 from deckgen.spec.claims import NUM_RE, name_core
+from deckgen.spec.deck_checks import NOISE
 from deckgen.spec.violations import Violation, v
 
 NL = chr(10)
@@ -79,6 +80,8 @@ def check_slide_text(llm: LLM, s: SlideSpec, cited: list[Finding], source_text: 
     evidence = facts + " " + source_text
     visible, out = slide_text(s), []
     for i in verdict.issues[:8]:
+        if not i.claim_quote.strip() or _norm(i.claim_quote) not in _norm(visible) or NOISE.search(i.contradicting_or_missing_passage + " " + i.claim_quote):
+            continue  # noise: no verbatim quote from the slide, or a remark saying it is fine after all
         if i.kind == "vague":
             out.append(v("faithfulness_vague", f"too vague, replace with a concrete fact from the findings: {i.claim_quote}"))
             continue

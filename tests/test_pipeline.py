@@ -52,11 +52,13 @@ def slide_draft(prompt, images):
     if n == 2:
         items = [ItemDraft(icon="FaCarSide", heading=f"Idea {i}", body=f"Rule {i}: builders needed 200 road cars in 1982.") for i in range(3)]
         return SlideDraft(**base, layout="TITLE_ONLY", title="Three ideas shaped the cars", comp_kind="cards", items=items)
+    if n == 3 and "DATA SETS FOR A CHART" not in prompt:   # no chart data exists in these findings: the writer must use a plain layout
+        items = [ItemDraft(icon="FaCogs", heading=f"Power {i}", body=f"Peaks were 450 hp, 480 hp and 500 hp in item {i}.") for i in range(3)]
+        return SlideDraft(**base, layout="TITLE_ONLY", title="Power climbed across the whole field", comp_kind="cards", items=items)
     if n == 3:
         return SlideDraft(**base, layout="CHART_COMMENTARY", title="Power climbed across the whole field",
-                          bullets=["Audi led on peak output", "Lancia followed closely"], chart_type="bar",
-                          chart_title="Approximate peak power (hp)", categories=["Peugeot", "Lancia", "Audi"],
-                          series=[SeriesDraft(name="hp", values=[450, 480, 500])])
+                          bullets=["Audi led on peak output", "Lancia followed closely"], chart_type="bar", data_ref="d1",
+                          chart_title="Approximate peak power (hp)")
     if n == 4:
         items = [ItemDraft(value="200", label="Road cars needed"), ItemDraft(value="1982", label="Group B begins"), ItemDraft(value="1986", label="Class banned")]
         return SlideDraft(**base, layout="TITLE_ONLY", title="Three dates and numbers define the era", comp_kind="stats", items=items)
@@ -69,7 +71,7 @@ def script():
         "research_query": lambda prompt, images: QueryPlan(queries=["group b q" + re.search(r"question (\d)", prompt).group(1)]),
         "research_extract": extract,
         "research_crosscheck": ConflictReport(links=[]),
-        "research_conflict_pairs": {"contradictions": []}, "facts_sheet": {"groups": []},
+        "research_conflict_pairs": {"contradictions": []}, "facts_sheet": {"groups": []}, "spec_deck": lambda prompt, images: (_ for _ in ()).throw(ValueError("no whole-deck script")),
         "outline": Outline(arc="rise-peak-fall-legacy", deck_title="Group B in brief", slides=[
             OutlineSlide(n=1, section="Open", purpose="Title", key_message="Intro", layout_hint="TITLE"),
             OutlineSlide(n=2, section="Open", purpose="Ideas", key_message="Ideas", finding_ids=["f01", "f02"], layout_hint="TITLE_ONLY"),
@@ -114,7 +116,9 @@ def test_smoke_end_to_end_offline(tmp_path, monkeypatch):
 def test_ungrounded_chart_value_rejected():
     f = {"f01": Finding(id="f01", question="q", claim="Audi made 500 hp", evidence_snippet="500 hp", source_type="official",
                         source_url="https://x.test/a", retrieved_at="2026-01-01T00:00:00+00:00", confidence="high")}
-    s = slide_draft("id=s03", None)
+    s = SlideDraft(id="s03", section="S", layout="CHART_COMMENTARY", title="Power climbed across the whole field", bullets=["Audi led", "Lancia followed"], chart_type="bar",
+                   chart_title="Approximate peak power (hp)", categories=["Peugeot", "Lancia", "Audi"], series=[SeriesDraft(name="hp", values=[450, 480, 500])],
+                   speaker_notes="Detail goes here. It has two sentences.", source_refs=["f01"])
     errs = check_slide(draft_to_slide(s.model_copy(update={"source_refs": ["f01"]})), f, [])
     assert any("450" in e and "not in the cited findings" in e for e in errs)
     low = s.model_copy(update={"source_refs": ["f01"], "series": [SeriesDraft(name="x", values=[1, 2, 3])]})

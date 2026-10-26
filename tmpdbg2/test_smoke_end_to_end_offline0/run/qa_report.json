@@ -1,0 +1,26 @@
+{
+ "rounds": [
+  {
+   "round": 0,
+   "inspected_slides": [
+    1,
+    2,
+    3,
+    4,
+    5
+   ],
+   "issues": [],
+   "action": "initial inspection",
+   "accepted": true,
+   "score": [
+    0,
+    0
+   ]
+  }
+ ],
+ "remaining": [],
+ "file_errors": [],
+ "render_error": null,
+ "models": [],
+ "stopped": "no blocking issues"
+}

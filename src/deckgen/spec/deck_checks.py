@@ -16,8 +16,18 @@ from deckgen.spec.claims import visible_fields
 SKIP = ("TITLE", "SECTION", "SOURCES", "CLOSING")
 
 
+NOISE = re.compile("(this is fine|that is fine|is fine,|no issue|not a contradiction|not actually|no real (problem|contradiction)|is consistent|are consistent|however,? (this|that|it) is)", re.I)
+
+
+class Quote(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    slide: int
+    text: str = Field(description="words copied EXACTLY from that slide")
+
+
 class Problem(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    quotes: list[Quote] = Field(default_factory=list)
     kind: Literal["contradiction", "redundancy", "unclear_reference", "title_mismatch"]
     slides: list[int] = Field(min_length=1, max_length=4, description="1-based slide numbers involved")
     description: str
@@ -96,7 +106,21 @@ def consistency(llm: LLM, spec: DeckSpec, findings: dict[str, Finding]) -> list[
         "different values (for example two different power figures, or different accounts of who withdrew); (2) unclear_reference: "
         "a statement that cannot be understood without context the deck never gives (for example 'the accident' with no earlier "
         "mention); (3) redundancy: the same point made on more than one slide; (4) title_mismatch: a slide whose title promises something its content does not deliver (a count, a scope, a claim the body does not state). Only report real problems; return an empty list "
-        "if there are none. Give the slide numbers involved and one sentence."
+        "if there are none. For each problem give the slide numbers, one sentence, and `quotes`: for every slide involved, the exact words copied from "
+        "that slide that show the problem. A problem without exact quotes, or one you conclude is fine, must not be listed."
     )
-    return llm.generate(stage="deck_consistency", system="You review a whole deck for internal consistency. Output JSON only.",
-                        prompt=prompt, schema=ProblemList).problems
+    found = llm.generate(stage="deck_consistency", system="You review a whole deck for internal consistency. Output JSON only.",
+                         prompt=prompt, schema=ProblemList).problems
+    return [p for p in found if keep(p, slide_texts(spec))]
+
+
+def _flat(t: str) -> str:
+    return " ".join(re.sub(r"[^\w%.,'-]+", " ", t.lower()).split())
+
+
+def keep(p: Problem, texts: dict[int, str]) -> bool:
+    """Checker noise filter: a problem counts only if it quotes words that really appear on the slide(s) it names, and is not a remark that
+    says the thing is fine after all."""
+    if NOISE.search(p.description) or not p.quotes:
+        return False
+    return all(_flat(q.text) and _flat(q.text) in _flat(texts.get(q.slide, "")) for q in p.quotes)

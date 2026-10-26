@@ -1,0 +1,115 @@
+{
+ "title": "Group B in brief",
+ "brand": "default_v1",
+ "slides": [
+  {
+   "id": "s01",
+   "section": "Open",
+   "layout": "TITLE",
+   "title": "Group B",
+   "placeholders": {
+    "subtitle": "Explain Group B"
+   },
+   "speaker_notes": "Audience: fans. Explain Group B",
+   "source_refs": []
+  },
+  {
+   "id": "s02",
+   "section": "Open",
+   "layout": "TITLE_ONLY",
+   "title": "Three ideas shaped the cars",
+   "placeholders": {},
+   "composition": {
+    "kind": "cards",
+    "items": [
+     {
+      "icon": "FaCarSide",
+      "heading": "Idea 0",
+      "body": "Rule 0: builders needed 200 road cars in 1982."
+     },
+     {
+      "icon": "FaCarSide",
+      "heading": "Idea 1",
+      "body": "Rule 1: builders needed 200 road cars in 1982."
+     },
+     {
+      "icon": "FaCarSide",
+      "heading": "Idea 2",
+      "body": "Rule 2: builders needed 200 road cars in 1982."
+     }
+    ]
+   },
+   "speaker_notes": "Detail goes here. It has two sentences.\nSources: f01 Page 0 (https://www.wrc.com/p/00); f02 Page 1 (https://www.topgear.com/p/01)",
+   "source_caption": "Source: wrc.com, topgear.com",
+   "source_refs": [
+    "f01",
+    "f02"
+   ]
+  },
+  {
+   "id": "s03",
+   "section": "Cars",
+   "layout": "TITLE_ONLY",
+   "title": "Three dates and numbers define the era",
+   "placeholders": {},
+   "composition": {
+    "kind": "stats",
+    "items": [
+     {
+      "value": "200",
+      "label": "Road cars needed"
+     },
+     {
+      "value": "1982",
+      "label": "Group B begins"
+     },
+     {
+      "value": "1986",
+      "label": "Class banned"
+     }
+    ]
+   },
+   "speaker_notes": "Detail goes here. It has two sentences.\nSources: f05 Page 0 (https://www.wrc.com/p/20); f06 Page 1 (https://www.topgear.com/p/21)",
+   "source_caption": "Source: wrc.com, topgear.com",
+   "source_refs": [
+    "f05",
+    "f06"
+   ]
+  },
+  {
+   "id": "s04",
+   "section": "End",
+   "layout": "CLOSING",
+   "title": "What to remember",
+   "placeholders": {
+    "body": [
+     "Rules invited radical cars",
+     "Speed outran safety",
+     "The legacy endures"
+    ]
+   },
+   "speaker_notes": "Detail goes here. It has two sentences.\nSources: f01 Page 0 (https://www.wrc.com/p/00); f02 Page 1 (https://www.topgear.com/p/01)",
+   "source_caption": "Source: wrc.com, topgear.com",
+   "source_refs": [
+    "f01",
+    "f02"
+   ]
+  },
+  {
+   "id": "s05",
+   "section": "Sources",
+   "layout": "SOURCES",
+   "title": "Sources",
+   "placeholders": {
+    "body": [
+     "Page 0 (wrc.com)",
+     "Page 1 (topgear.com)",
+     "Page 0 (wrc.com)",
+     "Page 1 (topgear.com)"
+    ]
+   },
+   "speaker_notes": "Sources actually used in this deck. Retrieval dates are in findings.json.",
+   "source_refs": []
+  }
+ ]
+}

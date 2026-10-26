@@ -1,0 +1,22 @@
+{
+ "warnings": [],
+ "dropped_unsupported_slides": [
+  {
+   "outline_slide": 3,
+   "message": "Power",
+   "category": "model",
+   "reason": "slide 3: the writer produced no usable slide: ['your output could not be used (a chart must use data_ref, one of none (no chart data exists: use another layout); leave categories and series empty); return only the fields in the schema']"
+  }
+ ],
+ "problems_found": [],
+ "repaired_slides": [],
+ "repair_failed_slides": [],
+ "deleted_slides": [],
+ "deleted_titles": [],
+ "deleted_reasons": {},
+ "unresolved": [],
+ "repair": {
+  "before": {},
+  "after": {}
+ }
+}

@@ -49,7 +49,7 @@ def _walk(root: Any, parts: list[str]) -> tuple[Any, str]:
     return cur, parts[-1]
 
 
-def apply_edits(slide: SlideSpec, edits: list[Edit]) -> SlideSpec:
+def apply_edits(slide: SlideSpec, edits: list[Edit], allow_growth: int = 0) -> SlideSpec:
     """Apply edits to a copy. Raises EditRejected if an edit is invalid, lengthens text, or total words grow."""
     data = slide.model_dump(exclude_none=True)
     before = word_count(data)
@@ -64,7 +64,7 @@ def apply_edits(slide: SlideSpec, edits: list[Edit]) -> SlideSpec:
                 old = parent[int(last)] if isinstance(parent, list) else parent[last]
                 if not isinstance(old, str):
                     raise EditRejected(f"{e.path} is not text")
-                if len(e.text.split()) > len(old.split()):
+                if not allow_growth and len(e.text.split()) > len(old.split()):
                     raise EditRejected(f"edit lengthens {e.path}")
                 if isinstance(parent, list):
                     parent[int(last)] = e.text
@@ -80,7 +80,7 @@ def apply_edits(slide: SlideSpec, edits: list[Edit]) -> SlideSpec:
             raise EditRejected(f"bad path {e.path}: {ex}") from ex
     for parent, idx in sorted(deletes, key=lambda t: -t[1]):  # high indices first
         del parent[idx]
-    if word_count(data) > before:
+    if word_count(data) > before + allow_growth:
         raise EditRejected("net word growth")
     try:
         return SlideSpec.model_validate(data)

@@ -1,0 +1,8 @@
+$ docker run --rm -v D:\projects\deckgen\tmpdbg2\test_smoke_end_to_end_offline0\run:/in:ro -v D:\projects\deckgen\tmpdbg2\test_smoke_end_to_end_offline0\run\final:/out deckgen-lo soffice --headless --invisible --norestore --nologo --nodefault -env:UserInstallation=file:///tmp/lo_profile_0 --convert-to pdf --outdir /out /in/deck.pptx
+convert /in/deck.pptx -> /out/deck.pdf using filter : impress_pdf_Export
+
+Warning: failed to launch javaldx - java may not function correctly
+
+$ docker run --rm -v D:\projects\deckgen\tmpdbg2\test_smoke_end_to_end_offline0\run\final:/in:ro -v D:\projects\deckgen\tmpdbg2\test_smoke_end_to_end_offline0\run\final\images:/out deckgen-lo pdftoppm -jpeg -r 150 /in/deck.pdf /out/slide
+
+

@@ -1,0 +1,13 @@
+{
+ "topic": "Group B",
+ "audience": "fans",
+ "slide_count": 6,
+ "brand": "default_v1",
+ "objective": "Explain Group B",
+ "research_questions": [
+  "question 0",
+  "question 1",
+  "question 2",
+  "question 3"
+ ]
+}

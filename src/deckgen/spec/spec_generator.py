@@ -27,6 +27,7 @@ from deckgen.spec.edit_loop import apply as apply_spec_edits
 from deckgen.spec.edit_loop import check_all, edit_loop, propose, score
 from deckgen.spec.rules import check_slide_v
 from deckgen.spec.validate_spec import load_manifest, validate_spec
+from deckgen.research.facts import facts_problems
 from deckgen.research.photos import listing as photo_listing
 from deckgen.spec.violations import Violation, classify_failure, hard, v
 from deckgen.spec.writer_prompt import select_source_text, stable_prefix, variable_part
@@ -123,9 +124,25 @@ def slide_source_text(o: OutlineSlide, pool: dict[str, Finding], passages: dict 
     return select_source_text(passages or {}, urls, f"{o.key_message} {o.purpose}")
 
 
+def finish_draft(d: SlideDraft, o: OutlineSlide, photos=None, data=None) -> SlideSpec:
+    """Draft -> slide: chart data filled by code from the named data set, photo attached from the offered candidates. Raises ValueError
+    (a message the writer can act on) when the draft cannot become a usable slide."""
+    d = d.model_copy(update={"id": f"s{o.n:02d}", "section": o.section})
+    if data is not None:
+        d = data.fill(d)
+    slide = draft_to_slide(d)
+    if slide.layout == "PHOTO_TEXT":
+        offered = photos.offered(o.n) if photos is not None and CONFIG.photos else []
+        got = photos.take(d.photo_id, o.n) if offered else None
+        if got is None:
+            raise ValueError(f"PHOTO_TEXT needs photo_id to be one of {[c.id for c in offered]}; otherwise choose another layout")
+        slide = slide.model_copy(update={"photo": got[0]})
+    return slide
+
+
 def write_slide(llm: LLM, brief: Brief, o: OutlineSlide, outline: Outline, pool: dict[str, Finding], brand_dir: Path,
                 prev: list[SlideSpec], is_last: bool, feedback: list[str] | None = None, passages: dict | None = None,
-                photos=None, facts_text: str = "") -> SlideSpec:
+                photos=None, facts_text: str = "", data=None) -> SlideSpec:
     """One writing pass (two only if the output cannot be converted to a slide). Quality problems are fixed afterwards by diffs.
     The stable prefix (style, layouts, limits, rules) is identical for every slide and is cached; the rest varies per slide."""
     style = (brand_dir / "style_guide.md").read_text(encoding="utf-8")
@@ -136,16 +153,11 @@ def write_slide(llm: LLM, brief: Brief, o: OutlineSlide, outline: Outline, pool:
     photo_text = photo_listing(offered)
     errors = list(feedback or [])
     for _ in range(2):
-        prompt = variable_part(brief, o, outline, preferred, pool_listing(pool), prev, is_last, errors, source_text, "", photo_text)
+        prompt = variable_part(brief, o, outline, preferred, pool_listing(pool), prev, is_last, errors, source_text, "", photo_text,
+                               data.listing(o.finding_ids) if data is not None else "")
         try:
             d = llm.generate(stage="spec_slide", system=SYSTEM, prompt=prompt, schema=SlideDraft, cache_prefix=prefix)
-            slide = draft_to_slide(d.model_copy(update={"id": f"s{o.n:02d}", "section": o.section}))
-            if slide.layout == "PHOTO_TEXT":
-                got = photos.take(d.photo_id, o.n) if offered else None
-                if got is None:
-                    raise ValueError(f"PHOTO_TEXT needs photo_id to be one of {[c.id for c in offered]}; otherwise choose another layout")
-                slide = slide.model_copy(update={"photo": got[0]})
-            return slide
+            return finish_draft(d, o, photos, data)
         except ValueError as e:  # DraftConversionError is a ValueError too: both mean "not a usable slide yet"
             errors = [f"your output could not be used ({str(e)[:200]}); return only the fields in the schema"]
     raise SpecGenerationError(f"slide {o.n}: the writer produced no usable slide: {errors}", "model")
@@ -161,22 +173,33 @@ def _correct(s: SlideSpec, findings: dict[str, Finding], prev: list[SlideSpec]) 
     return not [x for x in check_slide_v(s, findings, prev) if x.is_hard_correctness]
 
 
+def _plain(o: OutlineSlide) -> OutlineSlide:
+    return o.model_copy(update={"layout_hint": "TITLE_ONLY", "purpose": o.purpose + " (NO chart or table: the findings cannot ground the numbers; use cards, icon_rows or comparison)"})
+
+
 def build_slide(llm: LLM, brief: Brief, o: OutlineSlide, outline: Outline, pool: dict[str, Finding], brand_dir: Path,
                 prev: list[SlideSpec], is_last: bool, notes: dict | None = None, cache: Path | None = None,
-                degraded: bool = False, passages: dict | None = None, photos=None, facts_text: str = "") -> SlideSpec:
+                degraded: bool = False, passages: dict | None = None, photos=None, facts_text: str = "", data=None,
+                first: SlideSpec | None = None) -> SlideSpec:
     """Write once, check, fix with diffs, keep the best. See the module docstring for the failure sequence."""
     if cache and cache.exists() and not degraded:
         return SlideSpec.model_validate_json(cache.read_text(encoding="utf-8"))
     manifest = load_manifest(brand_dir)
     tr = getattr(llm, "tracer", None)
     src = slide_source_text(o, pool, passages)  # the checker and the fixer see exactly what the writer saw
-    s = write_slide(llm, brief, o, outline, pool, brand_dir, prev, is_last, passages=passages, photos=photos, facts_text=facts_text)
+    try:
+        s = first if first is not None else write_slide(llm, brief, o, outline, pool, brand_dir, prev, is_last, passages=passages, photos=photos, facts_text=facts_text, data=data)
+    except SpecGenerationError:
+        if o.layout_hint in ("CHART_COMMENTARY", "TABLE") and not degraded:  # e.g. no chart data exists: write it as a plain content slide instead
+            return build_slide(llm, brief, _plain(o), outline, pool, brand_dir, prev, is_last, notes, cache, degraded=True, passages=passages, photos=photos,
+                               facts_text=facts_text, data=data)
+        raise
     vs = check_all(llm, s, pool, prev, manifest, outline.deck_title, brief.brand, source_text=src)
     s, vs, rounds, rejected = edit_loop(llm, s, vs, pool, prev, manifest, outline.deck_title, brief.brand, pool_listing(pool, 40), source_text=src)
     if score(vs)[0] > 0:  # a confirmed correctness failure survived the repairs: one rewrite with the quoted issues, then one repair round
         issues = [x.message for x in hard(vs)][:6]
         try:
-            s2 = write_slide(llm, brief, o, outline, pool, brand_dir, prev, is_last, issues, passages=passages, photos=photos, facts_text=facts_text)
+            s2 = write_slide(llm, brief, o, outline, pool, brand_dir, prev, is_last, issues, passages=passages, photos=photos, facts_text=facts_text, data=data)
             vs2 = check_all(llm, s2, pool, prev, manifest, outline.deck_title, brief.brand, source_text=src)
             s2, vs2, r2, rej2 = edit_loop(llm, s2, vs2, pool, prev, manifest, outline.deck_title, brief.brand, pool_listing(pool, 40), rounds=1, source_text=src)
             rounds, rejected = rounds + 1 + r2, rejected + rej2
@@ -194,10 +217,10 @@ def build_slide(llm: LLM, brief: Brief, o: OutlineSlide, outline: Outline, pool:
         # only model-compensation rules still fail: keep the slide with warnings (never drop or replace it for a formatting rule)
         return _accept(s, vs, o.n, pool, notes, cache)
     if o.layout_hint in ("CHART_COMMENTARY", "TABLE") and not degraded:
-        plain = o.model_copy(update={"layout_hint": "TITLE_ONLY", "purpose": o.purpose + " (NO chart or table: the findings cannot ground the numbers; use cards, icon_rows or comparison)"})
+        plain = _plain(o)
         if tr:
             tr.attempts.setdefault("spec_slide_degraded", []).append(o.n)
-        return build_slide(llm, brief, plain, outline, pool, brand_dir, prev, is_last, notes, cache, degraded=True, passages=passages, photos=photos, facts_text=facts_text)
+        return build_slide(llm, brief, plain, outline, pool, brand_dir, prev, is_last, notes, cache, degraded=True, passages=passages, photos=photos, facts_text=facts_text, data=data)
     cited = [pool[i] for i in o.finding_ids if i in pool]
     fb = _fallback_slide(llm, o, cited, pool, prev)
     if fb is not None:
@@ -284,12 +307,15 @@ def closing_from_titles(o: OutlineSlide, slides: list[SlideSpec], by_id: dict[st
 
 
 def generate_spec(llm: LLM, brief: Brief, outline: Outline, findings: Findings, brand_dir: Path,
-                  run_dir: Path | None = None, photos=None, facts_text: str = "") -> DeckSpec:
+                  run_dir: Path | None = None, photos=None, facts_text: str = "", data=None, sheet=None) -> DeckSpec:
     by_id = {f.id: f for f in findings.findings if not f.excluded}  # outweighed or contested findings never reach slides
     slides: list[SlideSpec] = []
     dropped: list[dict] = []
     notes: dict = {}
     last_n = len(outline.slides)
+    from deckgen.spec.deck_writer import write_deck  # lazy: deck_writer imports this module
+
+    first = write_deck(llm, brief, outline, by_id, brand_dir, findings.passages, facts_text, photos, data) if CONFIG.whole_deck else {}
     for o in outline.slides:
         if o.n == 1 and o.layout_hint == "TITLE":
             slides.append(title_slide(brief, outline, o))  # built from the request, never from findings
@@ -302,7 +328,7 @@ def generate_spec(llm: LLM, brief: Brief, outline: Outline, findings: Findings, 
             o = o.model_copy(update={"finding_ids": earlier[:8] or o.finding_ids})
         try:
             slides.append(build_slide(llm, brief, o, outline, by_id, brand_dir, slides, o.n == last_n, notes, cache,
-                                      passages=findings.passages, photos=photos, facts_text=facts_text))
+                                      passages=findings.passages, photos=photos, facts_text=facts_text, data=data))
         except SpecGenerationError as e:
             if o.n == last_n and (cl := closing_from_titles(o, slides, by_id)) is not None:
                 slides.append(cl)
@@ -314,7 +340,7 @@ def generate_spec(llm: LLM, brief: Brief, outline: Outline, findings: Findings, 
     if dropped:  # evidence-bounded: a slide the findings cannot support is dropped, not faked
         gone = {u["outline_slide"] for u in dropped}
         outline = outline.model_copy(update={"slides": [x.model_copy(update={"n": k}) for k, x in enumerate([x for x in outline.slides if x.n not in gone], 1)]})
-    slides = _repair_deck(llm, brief, outline, by_id, brand_dir, slides, run_dir, {**notes, "dropped_unsupported_slides": dropped})
+    slides = _repair_deck(llm, brief, outline, by_id, brand_dir, slides, run_dir, {**notes, "dropped_unsupported_slides": dropped}, sheet)
     slides = [sl.model_copy(update={"id": f"s{k:02d}"}) for k, sl in enumerate(slides, 1)]
     used = [by_id[r] for s in slides for r in s.source_refs if r in by_id]
     slides.append(sources_slide(len(slides) + 1, used))
@@ -324,9 +350,10 @@ def generate_spec(llm: LLM, brief: Brief, outline: Outline, findings: Findings, 
     return spec
 
 
-def _deck_problems(llm: LLM, slides: list[SlideSpec], brief: Brief, outline: Outline, by_id: dict[str, Finding]) -> list[Problem]:
+def _deck_problems(llm: LLM, slides: list[SlideSpec], brief: Brief, outline: Outline, by_id: dict[str, Finding], sheet=None) -> list[Problem]:
     spec = DeckSpec(title=outline.deck_title, brand=brief.brand, slides=slides)
-    return consistency(llm, spec, by_id) + redundancy(spec) + shared_evidence(spec)
+    out = consistency(llm, spec, by_id) + redundancy(spec) + shared_evidence(spec)
+    return out + (facts_problems(spec, sheet) if sheet is not None else [])
 
 
 def richness(s: SlideSpec, by_id: dict[str, Finding]) -> float:
@@ -348,11 +375,11 @@ def _near_duplicates(slides: list[SlideSpec], threshold: float = 0.7) -> bool:
 
 
 def _repair_deck(llm: LLM, brief: Brief, outline: Outline, by_id: dict[str, Finding], brand_dir: Path,
-                 slides: list[SlideSpec], run_dir: Path | None, extra: dict | None = None) -> list[SlideSpec]:
+                 slides: list[SlideSpec], run_dir: Path | None, extra: dict | None = None, sheet=None) -> list[SlideSpec]:
     """One repair pass. Redundancy: KEEP THE RICHER of the two slides and delete the other (never title, closing or sources; never below
     the slide floor). Contradictions and unclear references are fixed on the later slide with a targeted diff.
     Whatever remains is written to deck_notes.json and surfaced in the run report."""
-    problems = _deck_problems(llm, slides, brief, outline, by_id)
+    problems = _deck_problems(llm, slides, brief, outline, by_id, sheet)
     last = len(slides)
     drop: dict[int, str] = {}
     for p in sorted((p for p in problems if p.kind == "redundancy"), key=lambda p: max(p.slides)):
@@ -387,7 +414,7 @@ def _repair_deck(llm: LLM, brief: Brief, outline: Outline, by_id: dict[str, Find
     dropped_titles = [slides[n - 1].title for n in sorted(drop)]
     if drop:
         slides = [s for k, s in enumerate(slides, 1) if k not in drop]
-    remaining = _deck_problems(llm, slides, brief, outline, by_id) if (drop or repaired) else problems
+    remaining = _deck_problems(llm, slides, brief, outline, by_id, sheet) if (drop or repaired) else problems
     if run_dir:
         out = {**(extra or {}), "problems_found": [p.model_dump() for p in problems], "repaired_slides": sorted(set(repaired)),
                "repair_failed_slides": sorted(set(failed)), "deleted_slides": sorted(drop), "deleted_titles": dropped_titles,

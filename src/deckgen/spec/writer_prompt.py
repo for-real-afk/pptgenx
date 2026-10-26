@@ -18,7 +18,7 @@ HOW_TO_FILL = (
     "rather than inventing one). TITLE_ONLY: comp_kind in {cards (2,3,4 or 6 items: icon, heading, body), icon_rows (2-5 items: "
     "icon, heading, body), stats (2-4 items: value, label, optional detail), timeline (3-5 items: year, heading, body), "
     "comparison (exactly 2 items: heading, bullets)}; leave unused item fields empty. CHART_COMMENTARY: chart_type "
-    "(bar/column/line/pie/doughnut), chart_title, categories, series [{name, values}], bullets. TABLE: table_header + "
+    "(bar/column/line/pie/doughnut), chart_title, data_ref (one of the DATA SETS offered for the slide; code fills the categories and values, so leave categories and series EMPTY and never type a chart value), bullets. TABLE: table_header + "
     "table_rows [{cells}]. PHOTO_TEXT (only when candidate photos are offered for the slide): photo_id (one offered id) + bullets (2-4); "
     "choose a photo only if its title shows what the slide is about, otherwise use another layout; never describe what a photo shows beyond "
     "what its title says. Always: id, section, title, speaker_notes (2-4 sentences with the detail and which source supports which "
@@ -70,7 +70,7 @@ def tags(f: Finding) -> str:
 
 
 def variable_part(brief: Brief, o: OutlineSlide, outline: Outline, preferred: list[Finding], pool_text: str, prev: list[SlideSpec],
-                  is_last: bool, feedback: list[str], source_text: str = "", shapes_text: str = "", photo_text: str = "") -> str:
+                  is_last: bool, feedback: list[str], source_text: str = "", shapes_text: str = "", photo_text: str = "", data_text: str = "") -> str:
     recent = ", ".join(f"{p.layout}/{p.composition.kind if p.composition else '-'}" for p in prev[-3:]) or "none yet"
     used_before = sorted({r for p in prev for r in p.source_refs})
     facts = NL.join(f"{f.id} [{tags(f)}] {f.claim} | evidence: {f.evidence_snippet}" for f in preferred) or "(none)"
@@ -85,6 +85,7 @@ def variable_part(brief: Brief, o: OutlineSlide, outline: Outline, preferred: li
         + (f"{NL}DATA SHAPES FOUND IN THE POOL (use one when it fits):{NL}{shapes_text}{NL}" if shapes_text and CONFIG.writer_chooses_layout else "")
         + (f"{NL}CANDIDATE PHOTOS FOR THIS SLIDE (real photographs, use layout PHOTO_TEXT with photo_id to show one; at most 5 photo slides in the deck):"
            f"{NL}{photo_text}{NL}" if photo_text else "")
+        + (f"{NL}DATA SETS FOR A CHART (code builds the chart from one of these; choose CHART_COMMENTARY only if one fits):{NL}{data_text}{NL}" if data_text else "")
         + f"{NL}FINDINGS ASSIGNED TO THIS SLIDE (full detail):{NL}{facts}{NL}"
         + (f"{NL}SOURCE TEXT (verbatim passages from the pages behind these findings; the findings and these passages are the only facts you may "
            f"use; cite finding ids):{NL}{source_text}{NL}" if source_text and CONFIG.writer_source_text else "")

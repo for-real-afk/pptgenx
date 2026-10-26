@@ -216,6 +216,7 @@ def repair(run: str = typer.Option(..., help="finished run id under runs/ (needs
     from deckgen.ledger import BudgetAbort
     from deckgen.llm import Tracer, make_llm
     from deckgen.pipeline import Request, report_md, run_pipeline
+    from deckgen.research.datasets import DataSets
     from deckgen.research.facts import Sheet, build_sheet
     from deckgen.schemas import DeckSpec
     from deckgen.schemas.research import Brief, Findings, Outline
@@ -239,7 +240,7 @@ def repair(run: str = typer.Option(..., help="finished run id under runs/ (needs
             ledger.stage_line("facts")
         sheet = Sheet.model_validate_json((dst / "facts.json").read_text(encoding="utf-8"))
         ledger.stage = "repair"
-        fixed, rep = repair_deck(llm, spec, brief, outline, findings, CONFIG.brands_dir / brief.brand, sheet.text())
+        fixed, rep = repair_deck(llm, spec, brief, outline, findings, CONFIG.brands_dir / brief.brand, sheet.text(), sheet, DataSets(findings.findings, sheet))
         ledger.stage_line("repair")
         write_log(dst / "repair_log.json", rep)
         (dst / "deck_spec.json").write_text(fixed.model_dump_json(exclude_none=True, indent=1), encoding="utf-8")

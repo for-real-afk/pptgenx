@@ -1,0 +1,33 @@
+{
+ "id": "s02",
+ "section": "Open",
+ "layout": "TITLE_ONLY",
+ "title": "Three ideas shaped the cars",
+ "placeholders": {},
+ "composition": {
+  "kind": "cards",
+  "items": [
+   {
+    "icon": "FaCarSide",
+    "heading": "Idea 0",
+    "body": "Rule 0: builders needed 200 road cars in 1982."
+   },
+   {
+    "icon": "FaCarSide",
+    "heading": "Idea 1",
+    "body": "Rule 1: builders needed 200 road cars in 1982."
+   },
+   {
+    "icon": "FaCarSide",
+    "heading": "Idea 2",
+    "body": "Rule 2: builders needed 200 road cars in 1982."
+   }
+  ]
+ },
+ "speaker_notes": "Detail goes here. It has two sentences.\nSources: f01 Page 0 (https://www.wrc.com/p/00); f02 Page 1 (https://www.topgear.com/p/01)",
+ "source_caption": "Source: wrc.com, topgear.com",
+ "source_refs": [
+  "f01",
+  "f02"
+ ]
+}

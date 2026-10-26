@@ -1,0 +1,9 @@
+{
+ "log": [
+  {
+   "ok": false,
+   "error": "photos: SKIPPED, DECKGEN_CONTACT is not set (Wikimedia requires a contact in the User-Agent)"
+  }
+ ],
+ "candidates": {}
+}

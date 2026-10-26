@@ -96,9 +96,14 @@ def test_redundancy_detected():
 
 def test_consistency_pass_wiring():
     spec = DeckSpec(title="t", brand="default_v1", slides=[slide()])
-    llm = FakeLLM({"deck_consistency": {"problems": [{"kind": "contradiction", "slides": [2, 3], "description": "power differs"}]}})
+    q = {"slide": 1, "text": "Builders needed 200 road cars in 1982"}
+    llm = FakeLLM({"deck_consistency": {"problems": [
+        {"kind": "contradiction", "slides": [1], "description": "power differs", "quotes": [q]},
+        {"kind": "contradiction", "slides": [1], "description": "no quote at all"},
+        {"kind": "contradiction", "slides": [1], "description": "quote is not on the slide", "quotes": [{"slide": 1, "text": "Zeta GT won everything"}]},
+        {"kind": "contradiction", "slides": [1], "description": "this is fine, but the dates are close", "quotes": [q]}]}})
     probs = consistency(llm, spec, FINDINGS)
-    assert probs[0].kind == "contradiction" and "SLIDE 1" in llm.calls[0]["prompt"]
+    assert [p.description for p in probs] == ["power differs"] and "SLIDE 1" in llm.calls[0]["prompt"]   # only a verbatim-quoted, non-dismissed problem counts
 
 
 def test_coverage_names_dropped_questions_with_reasons():
@@ -208,7 +213,7 @@ def test_checker_issue_blocks_only_when_code_confirms_it():
                                               {"claim_quote": "Audi won in 1982", "kind": "unsupported", "contradicting_or_missing_passage": "supported, no issue"},
                                               {"claim_quote": "words not on the slide", "kind": "unsupported"}]}})
     levels = [x.level for x in check_slide_text(bad, s, [FINDINGS["f01"]], source_text="Audi won in 1982.")]
-    assert levels == ["hard", "warn", "warn"]   # only the quote that is verbatim on the slide AND has untraceable key tokens is hard
+    assert levels == ["hard"]   # hard only for the quote verbatim on the slide with untraceable key tokens; "no issue" remarks and quotes not on the slide are dropped
     assert name_core("The Portugal") == "Portugal" and name_core("The Quattro") == "Quattro" and name_core("Michele Mouton") == "Michele Mouton"
 
 

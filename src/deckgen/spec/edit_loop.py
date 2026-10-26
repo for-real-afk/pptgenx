@@ -43,13 +43,15 @@ def score(vs: list[Violation]) -> tuple[int, int]:
     return sum(x.is_hard_correctness for x in vs), len(hard(vs))
 
 
-def propose(llm: LLM, s: SlideSpec, vs: list[Violation], findings: dict[str, Finding], pool_hint: str = "", source_text: str = "", facts_text: str = "") -> SpecEdits:
+def propose(llm: LLM, s: SlideSpec, vs: list[Violation], findings: dict[str, Finding], pool_hint: str = "", source_text: str = "", facts_text: str = "", allow_growth: int = 0) -> SpecEdits:
     cited = "\n".join(f"{r} [{urlparse(findings[r].source_url).netloc.removeprefix("www.")}]: {findings[r].claim}" for r in s.source_refs if r in findings)
     issues = "\n".join(f"- [{x.check}] {x.message}" for x in hard(vs)[:10])
     prompt = (
         "Fix ONLY the violations listed, with the fewest edits. Allowed: replace a text field with wording that has the same number of "
-        "words or fewer; delete one list item; add finding ids to `cite` when another listed finding supports the slide. Never lengthen "
-        "text, never invent facts: use only what the cited or available findings say. Paths are JSON pointers into the slide, for example "
+        "words or fewer; delete one list item; add finding ids to `cite` when another listed finding supports the slide. "
+        + (f"The slide may grow by at most {allow_growth} words IN TOTAL, and only where needed to resolve the violation (a clarifying or hedging word); never to fill space. "
+           if allow_growth else "Never lengthen text. ")
+        + "Never invent facts: use only what the cited or available findings say. Paths are JSON pointers into the slide, for example "
         "/title, /placeholders/body/1, /composition/items/2/body.\n"
         f"SLIDE:\n{s.model_dump_json(exclude_none=True)}\n\nVIOLATIONS:\n{issues}\n\nCITED FINDINGS:\n{cited}\n"
         + (f"\nOTHER AVAILABLE FINDINGS (for `cite` or for exact wording):\n{pool_hint}\n" if pool_hint else "")
@@ -59,8 +61,8 @@ def propose(llm: LLM, s: SlideSpec, vs: list[Violation], findings: dict[str, Fin
     return llm.generate(stage="fixer", system=SYSTEM, prompt=prompt, schema=SpecEdits)
 
 
-def apply(s: SlideSpec, e: SpecEdits, findings: dict[str, Finding]) -> SlideSpec:
-    out = apply_edits(s, e.edits) if e.edits else s
+def apply(s: SlideSpec, e: SpecEdits, findings: dict[str, Finding], allow_growth: int = 0) -> SlideSpec:
+    out = apply_edits(s, e.edits, allow_growth) if e.edits else s
     add = [r for r in e.cite if r in findings and r not in out.source_refs]
     if e.cite and not add and not e.edits:
         raise EditRejected("cite names no usable finding")
