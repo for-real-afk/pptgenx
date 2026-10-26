@@ -73,7 +73,7 @@ def _photo_catalog(llm, brief, outline, run_dir: Path, ledger, force: int):
     return cat
 
 
-HEDGE_RE = re.compile(r"(approximately|roughly|about|around|reportedly|according to|sources differ|estimated|some sources)", re.I)
+HEDGE_RE = re.compile("(approximately|roughly|about|around|reportedly|according to|sources differ|estimated|some sources)", re.I)
 
 
 def hedged_claims(spec: DeckSpec) -> int:
