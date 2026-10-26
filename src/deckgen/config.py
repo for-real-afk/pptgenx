@@ -84,7 +84,7 @@ class Config:
     # single-agent loop (v2)
     agent_budget_usd: float = _float("DECKGEN_AGENT_BUDGET_USD", 12.0)     # per run, inside the overall account cap
     agent_account_cap_usd: float = _float("DECKGEN_ACCOUNT_CAP_USD", 25.0)  # all runs together (summed from runs/*/usage.jsonl)
-    agent_max_tool_calls: int = _int("DECKGEN_AGENT_MAX_TOOL_CALLS", 200)
+    agent_max_tool_calls: int = _int("DECKGEN_AGENT_MAX_TOOL_CALLS", 120)
     agent_max_seconds: int = _int("DECKGEN_AGENT_MAX_SECONDS", 3000)
     # budget split per phase (fractions of the run budget): research and writing are capped, look-and-fix gets the rest, a reserve is never spent on turns
     agent_research_frac: float = _float("DECKGEN_AGENT_RESEARCH_FRAC", 0.25)

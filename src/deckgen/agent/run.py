@@ -88,7 +88,7 @@ def _salvage(tools: AgentTools) -> str:
     left = []
     if record.hard:
         left.append(f"{len(record.hard)} hard issues (overflow, off-slide or invalid file) remain: slides {sorted({i.slide for i in record.hard})}")
-    unseen = sorted(set(range(1, record.slides + 1)) - set(b.views))
+    unseen = sorted(b.needs_view(record) - set(b.views))
     if unseen:
         left.append(f"slides never looked at: {unseen}")
     return "; ".join(left) or "nothing blocking, but the agent did not call finish"
@@ -121,7 +121,7 @@ def report_md(r: dict) -> str:
             f"- cost by phase: {r['phase_cost']}; by model: {r['model_cost']}",
             f"- pages fetched: {r['pages']} (cap {r['page_cap']}); gaps named in notes.md: {len(r['gaps'])}: {r['gaps']}",
             f"- context tokens per turn: {r['context']}",
-            f"- tool calls: {r['tool_calls']} ({r['tool_failures']} failed); model turns: {r['model_calls']}; builds: {r['builds']}; slide views: {r['slide_views']}; never viewed: {r['never_viewed'] or 'none'}",
+            f"- tool calls: {r['tool_calls']} ({r['tool_failures']} failed); model turns: {r['model_calls']}; builds: {r['builds']}; slide views: {r['slide_views']}; slides viewed: {r['viewed_slides']}; required but never viewed: {r['never_viewed'] or 'none'}",
             f"- provider prompt cache: {r['cache_hit_rate']:.1f}% of input tokens read from cache",
             f"- failed or cut-off model calls: {r['failed_calls']} costing ${r['failed_cost']:.4f}",
             f"- hedging: {r['hedging']}", f"- layout mix: {r['layout_mix']}", f"- review list: {r['review_items']} items in review_before_use.md", "", r["usage"]]
@@ -145,7 +145,7 @@ def _finish_report(topic: str, slides: int, run_dir: Path, ledger: Ledger, tools
         "total_usd": ledger.total, "budget_usd": phases.total, "aborted": aborted, "pages": len(tools.reader.fetched), "page_cap": tools.reader.max_pages, "gaps": tools.work.gaps(),
         "context": _context_sizes(ledger), "tool_calls": stats["tool_calls"], "tool_failures": sum(1 for x in ledger.rows if x["role"] == "tool" and x["outcome"] != "ok"),
         "model_calls": stats["model_calls"], "builds": tools.builder.build_count, "slide_views": sum(tools.builder.views.values()),
-        "never_viewed": sorted(set(range(1, len(built) + 1)) - set(tools.builder.views)), "cache_hit_rate": 100 * cr / max(tin + cr + cw, 1),
+        "viewed_slides": sorted(tools.builder.views), "never_viewed": sorted(tools.builder.needs_view(tools.builder.best()) - set(tools.builder.views)) if tools.builder.best() else [], "cache_hit_rate": 100 * cr / max(tin + cr + cw, 1),
         "failed_calls": len(bad), "failed_cost": sum(x["cost_usd"] for x in bad), "hedging": hedging, "layout_mix": mix,
         "review_items": sum(1 for line in notes.read_text(encoding="utf-8").splitlines() if line.strip().startswith(("-", "*"))) if notes.exists() else 0,
         "photos": "skipped: the agent loop has no photo tool in this version" + ("" if os.environ.get("DECKGEN_CONTACT") else "; DECKGEN_CONTACT is not set"),
@@ -174,6 +174,11 @@ def run_agent(topic: str, audience: str, slides: int, run_dir: Path, *, budget: 
             f"Budget: ${budget:.2f} in total; research may use {CONFIG.agent_research_frac:.0%}, writing {CONFIG.agent_write_frac:.0%}, the rest is for looking and fixing.{NL}"
             + ("Approval: the outline is auto-approved; write outline.md, then carry on with the build script." if yes else "Approval: write outline.md, then stop and wait for the user's approval.")
             + NL + "Work from the skill file instructions. Begin with research.")
+    return _execute(loop, tools, ledger, phases, run_dir, topic, slides, task)
+
+
+def _execute(loop: AgentLoop, tools: AgentTools, ledger: Ledger, phases: PhaseBudget, run_dir: Path, topic: str, slides: int, task: str) -> dict:
+    """Run the loop to its end, whatever ends it, and leave the best deck, the usage summary and the run report behind."""
     aborted = ""
     try:
         stats = loop.run(task)

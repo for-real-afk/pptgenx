@@ -182,6 +182,28 @@ def agent(topic: str = typer.Option(..., help="deck topic"), audience: str = typ
     typer.echo(f"deck: {run_dir / 'deck.pptx'}")
 
 
+@app.command("agent-fix")
+def agent_fix(run: str = typer.Option(..., help="finished agent run id under runs/ (needs deck.pptx and work/build.js)"), out: str = typer.Option(None, help="new run id (default <run>-fix)"),
+              instructions: Path = typer.Option(..., help="text file with the fixes to make"),
+              slides: str = typer.Option(..., help="comma-separated slide numbers whose current text is shown to the agent, e.g. 3,10,11,12,13"),
+              budget: float = typer.Option(0.6, "--budget", help="hard USD cap for this pass"), tier_overrides: str = typer.Option(None)) -> None:
+    """Bounded fix pass on a finished agent run (no research, starts in look-and-fix); writes a new run directory."""
+    from deckgen.agent.fixup import run_fixup
+    from deckgen.agent.run import report_md
+
+    spent = Ledger.account_spent(CONFIG.runs_dir)
+    left = CONFIG.agent_account_cap_usd - spent
+    typer.echo(f"account: ${spent:.2f} spent of ${CONFIG.agent_account_cap_usd:.2f}; ${left:.2f} left; this pass is capped at ${budget:.2f}")
+    if left < budget:
+        typer.echo("STOP: the pass budget is more than what is left under the account cap.")
+        raise typer.Exit(EXIT_ESTIMATE_TOO_HIGH)
+    out_dir = CONFIG.runs_dir / (out or f"{run}-fix")
+    result = run_fixup(CONFIG.runs_dir / run, out_dir, instructions.read_text(encoding="utf-8"), [int(n) for n in slides.split(",")], budget=budget,
+                       tier_overrides=tier_overrides, echo=typer.echo)
+    typer.echo(report_md(result))
+    typer.echo(f"deck: {out_dir / 'deck.pptx'}")
+
+
 @app.command("eval")
 def eval_(golden: Path = typer.Option(Path("evals/golden_topics.json")), only: str = typer.Option(None, help="substring of topic"),
           runs: int = typer.Option(3, help="runs per topic (run 1 does the research)")) -> None:

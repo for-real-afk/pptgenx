@@ -9,6 +9,7 @@ const path = require("path");
 const vm = require("vm");
 const { newDeck } = require("./build_deck");
 const { applyTheme } = require("./apply_theme");
+const { pruneEmptyPlaceholders } = require("./prune");
 const helpers = require("./helpers");
 
 const BLOCKED = /^(child_process|net|http|https|http2|dgram|dns|tls|worker_threads|cluster|vm|os|inspector)$/;
@@ -63,6 +64,7 @@ async function main() {
     process.exit(1);
   }
   await pres.writeFile({ fileName: out });
+  await pruneEmptyPlaceholders(out);
   await applyTheme(out, theme);
   console.log(JSON.stringify({ ok: true, slides: pres.slides.length }));
   process.exit(0);

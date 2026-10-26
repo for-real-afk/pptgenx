@@ -86,6 +86,7 @@ class DeckBuilder:
         self.script: str | None = None
         self.finished = False
         self.wrapup = False
+        self.baseline: list[tuple] | None = None      # fix pass: the text of every slide before the pass; only changed slides must be looked at again
 
     # ---- script and build -------------------------------------------------------------------------------------------------------------
     def t_write_build_script(self, path: str, content: str, append: bool = False) -> str:
@@ -199,7 +200,7 @@ class DeckBuilder:
         stuck = sorted({i.slide for i in record.issues if i.type in HARD_TYPES})
         if stuck:
             out.append(f"overflow or off-slide issues on slides {stuck}")
-        unseen = sorted(set(range(1, record.slides + 1)) - set(self.views))
+        unseen = sorted(self.needs_view(record) - set(self.views))
         if unseen:
             out.append(f"you have not looked at slides {unseen}: call render_slides on them and fix what you see first")
         if record.slides > self.max_slides:
@@ -207,6 +208,15 @@ class DeckBuilder:
         if not notes.exists():
             out.append(f"review notes file work/{notes.name} does not exist")
         return out
+
+    def needs_view(self, record: BuildRecord) -> set[int]:
+        """Slides that must have been looked at: all of them, or in a fix pass only those whose text differs from the baseline."""
+        if self.baseline is None:
+            return set(range(1, record.slides + 1))
+        from deckgen.qa.slide_text import extract
+
+        now = extract(record.deck)
+        return {s.number for s in now if s.number > len(self.baseline) or (s.title, s.texts, s.tables, s.charts) != self.baseline[s.number - 1]}
 
     def t_finish(self, deck_path: str, review_notes_path: str) -> str:
         deck = self._deck(deck_path)

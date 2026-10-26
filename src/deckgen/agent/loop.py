@@ -102,9 +102,9 @@ def trim(messages: list[dict], names: dict[str, str]) -> list[dict]:
 
 class AgentLoop:
     def __init__(self, tools, ledger, phases, *, model: str, system_text: str, tool_defs: list[dict], max_calls: int, max_seconds: int,
-                 transport=anthropic_transport, approval=None):
+                 transport=anthropic_transport, approval=None, max_tokens: int = MAX_TOKENS):
         self.tools, self.ledger, self.phases, self.model, self.transport, self.approval = tools, ledger, phases, model, transport, approval
-        self.max_calls, self.max_seconds = max_calls, max_seconds
+        self.max_calls, self.max_seconds, self.max_tokens = max_calls, max_seconds, max_tokens
         self.system = [{"type": "text", "text": system_text, "cache_control": {"type": "ephemeral"}}]
         self.tool_defs = copy.deepcopy(tool_defs)
         self.tool_defs[-1]["cache_control"] = {"type": "ephemeral"}      # skill + manifest + tools are the stable cached prefix
@@ -121,7 +121,7 @@ class AgentLoop:
         if isinstance(last, str):
             msgs[-1]["content"] = last = [{"type": "text", "text": last}]
         last[-1]["cache_control"] = {"type": "ephemeral"}                # rolling breakpoint on the newest block
-        body = {"model": self.model, "max_tokens": MAX_TOKENS, "system": self.system, "tools": self.tool_defs, "messages": msgs}
+        body = {"model": self.model, "max_tokens": self.max_tokens, "system": self.system, "tools": self.tool_defs, "messages": msgs}
         if "sonnet" in self.model:
             body["thinking"] = {"type": "between_tools"}                 # see providers/anthropic.py
         return body
@@ -130,7 +130,7 @@ class AgentLoop:
         body = self._body()
         sys_text, msg_text, images = flatten(self.system, self.tool_defs, body["messages"])
         self.ledger.stage = self.phases.phase
-        self.ledger.check(self.model, sys_text, msg_text, MAX_TOKENS, images)         # raises BudgetAbort before any spend that could pass the cap
+        self.ledger.check(self.model, sys_text, msg_text, self.max_tokens, images)         # raises BudgetAbort before any spend that could pass the cap
         t0 = time.time()
         try:
             resp = self.transport(body)

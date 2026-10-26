@@ -277,3 +277,33 @@ def test_the_agent_is_told_to_wrap_up_before_the_tool_call_limit(tmp_path, roles
     loop = AgentLoop(tools, ledger, phases, model="m-main", system_text="s", tool_defs=tool_definitions(), max_calls=10, max_seconds=60, transport=tr)
     loop.run("task")
     assert any("tool call limit is nearly reached" in json.dumps(c["messages"]) for c in tr.calls) and phases.phase == "wrapup"
+
+
+def test_empty_placeholders_are_removed_from_a_built_deck(tmp_path, roles):
+    tools, _, _ = make_tools(tmp_path)
+    tools.call("write_build_script", {"path": "build.js", "content": GOOD_SCRIPT})
+    out, err = tools.call("run_build", {})
+    assert not err and "placeholder_text" not in out
+    prs = Presentation(tmp_path / "work" / "deck_1.pptx")
+    for slide in prs.slides:
+        assert all(not sh.is_placeholder or sh.text_frame.text.strip() for sh in slide.shapes if sh.has_text_frame)
+
+
+def test_fix_pass_starts_in_look_phase_needs_only_changed_slides_viewed_and_closes_research(tmp_path, roles):
+    from deckgen.agent.fixup import run_fixup
+
+    src = tmp_path / "src"
+    (src / "work").mkdir(parents=True)
+    (src / "work" / "build.js").write_text(GOOD_SCRIPT, encoding="utf-8")
+    (src / "work" / "notes.md").write_text("notes", encoding="utf-8")
+    tools, _, _ = make_tools(src / "tmp")
+    tools.call("write_build_script", {"path": "build.js", "content": GOOD_SCRIPT})
+    tools.call("run_build", {})
+    __import__("shutil").copy(src / "tmp" / "work" / "deck_1.pptx", src / "deck.pptx")
+    responses = [reply(use(1, "search", query="no")), reply(use(2, "edit_build_script", path="build.js", old="First point", new="A changed point")),
+                 reply(use(3, "run_build")), reply(use(4, "render_slides", deck_path="deck_1.pptx", slides=[2])),
+                 reply(use(5, "write_file", path="review.md", content="- changed slide 2\n")), reply(use(6, "finish", deck_path="deck_1.pptx", review_notes_path="review.md"))]
+    r = run_fixup(src, tmp_path / "out", "change the first point", [2], budget=0.6, transport=scripted(responses), renderer=fake_renderer, echo=lambda s: None)
+    assert r["stop_reason"] == "finished" and r["viewed_slides"] == [2] and r["never_viewed"] == [] and r["total_usd"] <= 0.6      # slide 1 was not changed: no new look needed
+    assert (tmp_path / "out" / "deck.pptx").exists() and "A changed point" in (tmp_path / "out" / "work" / "build.js").read_text()
+    assert [row["pipeline_stage"] for row in map(json.loads, (tmp_path / "out" / "usage.jsonl").read_text().splitlines()) if row["role"] == "agent"][0] == "look"
