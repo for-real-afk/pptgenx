@@ -81,6 +81,12 @@ class TableSpec(_Strict):
     rows: list[list[str]] = Field(min_length=1, max_length=6)
 
 
+class Photo(_Strict):
+    path: str    # local JPEG, already cropped to the PHOTO_TEXT frame
+    alt: str
+    credit: str  # shown on the slide: author, licence, Commons
+
+
 class SlideSpec(_Strict):
     id: str
     section: str
@@ -90,6 +96,7 @@ class SlideSpec(_Strict):
     composition: Composition | None = None
     chart: ChartSpec | None = None
     table: TableSpec | None = None
+    photo: Photo | None = None
     speaker_notes: str = ""
     source_caption: str | None = None
     source_refs: list[str] = Field(default_factory=list)

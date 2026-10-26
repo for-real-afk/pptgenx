@@ -78,6 +78,7 @@ class Config:
     # writer behaviour (round 3): what worked in the hand-built comparison deck
     writer_source_text: bool = os.environ.get("DECKGEN_WRITER_SOURCE_TEXT", "1") == "1"      # relevant full source passages go to the writer
     writer_chooses_layout: bool = os.environ.get("DECKGEN_WRITER_CHOOSES_LAYOUT", "1") == "1"  # outline layout_hint is a suggestion only
+    photos: bool = os.environ.get("DECKGEN_PHOTOS", "1") == "1"                              # real photographs (Wikimedia Commons) on PHOTO_TEXT slides
     hedge_contested: bool = os.environ.get("DECKGEN_HEDGE_CONTESTED", "1") == "1"            # equal-weight conflicts are hedged on the slide, not dropped
     # QA
     qa_max_rounds: int = 3

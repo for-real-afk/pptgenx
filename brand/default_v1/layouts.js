@@ -39,6 +39,15 @@ const LAYOUTS = [
     ],
   },
   {
+    name: "PHOTO_TEXT", dark: false,
+    use_when: "One real photograph on the left (picked from the candidates offered for the slide) with 2-4 bullets on the right.",
+    photo: { x: MARGIN, y: 1.65, w: 7.6, h: 4.85 },
+    placeholders: [
+      { name: "title", type: "title", ...TITLE_BOX, fontSize: 28, bold: true, color: "tx2", valign: "middle" },
+      { name: "body", type: "body", x: 8.5, y: 1.65, w: W - MARGIN - 8.5, h: 4.85, fontSize: 16, color: "tx1", valign: "middle" },
+    ],
+  },
+  {
     name: "TABLE", dark: false,
     use_when: "A compact comparison table (max ~6 rows x 5 columns).",
     placeholders: [

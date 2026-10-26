@@ -44,6 +44,26 @@ def _write(path: Path, model) -> None:
     path.write_text(model.model_dump_json(exclude_none=True, indent=1), encoding="utf-8")
 
 
+def _photo_catalog(llm, brief, outline, run_dir: Path, ledger, force: int):
+    """Candidate photos per slide from Wikimedia Commons (cached in photos.json). A search failure means no photos, never a failed run."""
+    from deckgen.research.photos import Catalog, find_for_outline
+
+    path, dest = run_dir / "photos.json", run_dir / "photos"
+    if path.exists() and STAGES.index("spec") < force:
+        return Catalog.from_json(path.read_text(encoding="utf-8"), dest)
+    if ledger:
+        ledger.stage = "photos"
+    try:
+        cat = Catalog(find_for_outline(llm, brief, outline), dest)
+    except Exception as e:  # noqa: BLE001 - photos are a bonus; the deck still builds without them
+        print(f"photos: skipped ({type(e).__name__}: {str(e)[:100]})")
+        cat = Catalog({}, dest)
+    path.write_text(cat.to_json(), encoding="utf-8")
+    if ledger:
+        ledger.stage_line("photos")
+    return cat
+
+
 def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *, auto_approve: bool = False,
                  from_stage: str | None = None, do_qa: bool = True,
                  confirm: Callable | None = None, edit: Callable | None = None, ledger=None) -> dict:
@@ -75,7 +95,8 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
     ids = {f.id for f in findings.findings if not f.excluded}
     outline = stage("outline", run_dir / "outline.json", Outline, lambda: outliner.approve(
         outliner.outline(llm, brief, findings), brief, ids, run_dir / "outline.json", auto_approve, confirm, edit))
-    spec = stage("spec", run_dir / "deck_spec.json", DeckSpec, lambda: generate_spec(llm, brief, outline, findings, brand_dir, run_dir))
+    photos = _photo_catalog(llm, brief, outline, run_dir, ledger, force) if CONFIG.photos else None
+    spec = stage("spec", run_dir / "deck_spec.json", DeckSpec, lambda: generate_spec(llm, brief, outline, findings, brand_dir, run_dir, photos=photos))
 
     qa_report: QAReport | None = None
     if do_qa:
@@ -113,6 +134,8 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
     by_id = {f.id: f for f in findings.findings}
     used_ids = sorted({r for s in spec.slides for r in s.source_refs})
     write_sources(run_dir / "sources.md", [by_id[i] for i in used_ids if i in by_id])
+    with (run_dir / "sources.md").open("a", encoding="utf-8") as fh:
+        fh.writelines(f"{chr(10)}- slide {i} photo: {sl.photo.alt} - {sl.photo.credit}" for i, sl in enumerate(spec.slides, 1) if sl.photo)
     tracer = getattr(llm, "tracer", None)
     notes_path = run_dir / "deck_notes.json"
     deck_notes = json.loads(notes_path.read_text(encoding="utf-8")) if notes_path.exists() else {}
@@ -172,6 +195,8 @@ def review_items(spec: DeckSpec, by_id: dict, notes: dict, findings_obj=None) ->
                 g = shaky.setdefault(why, {"ids": {}, "slides": set()})
                 g["ids"][r] = f.source_url
                 g["slides"].add(i)
+        if s.photo:
+            out.append(f"slide {i}: photo '{s.photo.alt}' ({s.photo.credit}) was chosen from its Commons title only; check it shows what the slide says (file pages in photos.json)")
         if "built directly from the research findings" in s.speaker_notes.lower():
             out.append(f"slide {i}: fallback slide built from raw findings after generation failed; wording is plain by design")
     out += [f"{len(g['ids'])} finding(s) used on slides {sorted(g['slides'])}: {why} - ids {sorted(g['ids'])} (urls in findings.json)" for why, g in shaky.items()]

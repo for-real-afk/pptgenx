@@ -18,7 +18,7 @@ SLIDE_W, CONTENT_BOTTOM = 13.333, 6.5
 AVG_CHAR_EM, LINE_EM = 0.5, 1.2
 BENIGN_OVERLAP = ("Timeline rail", " marker")   # rail passes through its markers by design
 CAPTION_OK = ("Source caption",)
-BALANCED_LAYOUTS = {"TITLE_ONLY", "CHART_COMMENTARY", "TABLE"}
+BALANCED_LAYOUTS = {"TITLE_ONLY", "CHART_COMMENTARY", "TABLE", "PHOTO_TEXT"}
 
 
 @dataclass(frozen=True)

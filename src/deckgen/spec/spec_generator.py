@@ -26,6 +26,7 @@ from deckgen.spec.edit_loop import apply as apply_spec_edits
 from deckgen.spec.edit_loop import check_all, edit_loop, propose, score
 from deckgen.spec.rules import check_slide_v
 from deckgen.spec.validate_spec import load_manifest, validate_spec
+from deckgen.research.photos import listing as photo_listing
 from deckgen.spec.violations import Violation, classify_failure, hard, v
 from deckgen.spec.writer_prompt import select_source_text, stable_prefix, variable_part
 
@@ -115,19 +116,27 @@ def sources_slide(n: int, used: list[Finding]) -> SlideSpec:
 
 def write_slide(llm: LLM, brief: Brief, o: OutlineSlide, outline: Outline, pool: dict[str, Finding], brand_dir: Path,
                 prev: list[SlideSpec], is_last: bool, feedback: list[str] | None = None, passages: dict | None = None,
-                shapes_text: str = "") -> SlideSpec:
+                photos=None) -> SlideSpec:
     """One writing pass (two only if the output cannot be converted to a slide). Quality problems are fixed afterwards by diffs.
     The stable prefix (style, layouts, limits, rules) is identical for every slide and is cached; the rest varies per slide."""
     style = (brand_dir / "style_guide.md").read_text(encoding="utf-8")
     preferred = [pool[i] for i in o.finding_ids if i in pool]
     source_text = select_source_text(passages or {}, sorted({f.source_url for f in preferred}), f"{o.key_message} {o.purpose}") if CONFIG.writer_source_text else ""
     prefix = stable_prefix(style, _layout_menu(brand_dir), _limits_menu())
+    offered = photos.offered(o.n) if photos is not None and CONFIG.photos else []
+    photo_text = photo_listing(offered)
     errors = list(feedback or [])
     for _ in range(2):
-        prompt = variable_part(brief, o, outline, preferred, pool_listing(pool), prev, is_last, errors, source_text, shapes_text)
+        prompt = variable_part(brief, o, outline, preferred, pool_listing(pool), prev, is_last, errors, source_text, "", photo_text)
         try:
             d = llm.generate(stage="spec_slide", system=SYSTEM, prompt=prompt, schema=SlideDraft, cache_prefix=prefix)
-            return draft_to_slide(d.model_copy(update={"id": f"s{o.n:02d}", "section": o.section}))
+            slide = draft_to_slide(d.model_copy(update={"id": f"s{o.n:02d}", "section": o.section}))
+            if slide.layout == "PHOTO_TEXT":
+                got = photos.take(d.photo_id, o.n) if offered else None
+                if got is None:
+                    raise ValueError(f"PHOTO_TEXT needs photo_id to be one of {[c.id for c in offered]}; otherwise choose another layout")
+                slide = slide.model_copy(update={"photo": got[0]})
+            return slide
         except ValueError as e:  # DraftConversionError is a ValueError too: both mean "not a usable slide yet"
             errors = [f"your output could not be used ({str(e)[:200]}); return only the fields in the schema"]
     raise SpecGenerationError(f"slide {o.n}: the writer produced no usable slide: {errors}", "model")
@@ -145,13 +154,13 @@ def _correct(s: SlideSpec, findings: dict[str, Finding], prev: list[SlideSpec]) 
 
 def build_slide(llm: LLM, brief: Brief, o: OutlineSlide, outline: Outline, pool: dict[str, Finding], brand_dir: Path,
                 prev: list[SlideSpec], is_last: bool, notes: dict | None = None, cache: Path | None = None,
-                degraded: bool = False, passages: dict | None = None, shapes_text: str = "") -> SlideSpec:
+                degraded: bool = False, passages: dict | None = None, photos=None) -> SlideSpec:
     """Write once, check, fix with diffs, keep the best. See the module docstring for the failure sequence."""
     if cache and cache.exists() and not degraded:
         return SlideSpec.model_validate_json(cache.read_text(encoding="utf-8"))
     manifest = load_manifest(brand_dir)
     tr = getattr(llm, "tracer", None)
-    s = write_slide(llm, brief, o, outline, pool, brand_dir, prev, is_last, passages=passages, shapes_text=shapes_text)
+    s = write_slide(llm, brief, o, outline, pool, brand_dir, prev, is_last, passages=passages, photos=photos)
     vs = check_all(llm, s, pool, prev, manifest, outline.deck_title, brief.brand)
     s, vs, rounds, rejected = edit_loop(llm, s, vs, pool, prev, manifest, outline.deck_title, brief.brand, pool_listing(pool, 40))
     if rejected:
@@ -167,7 +176,7 @@ def build_slide(llm: LLM, brief: Brief, o: OutlineSlide, outline: Outline, pool:
         plain = o.model_copy(update={"layout_hint": "TITLE_ONLY", "purpose": o.purpose + " (NO chart or table: the findings cannot ground the numbers; use cards, icon_rows or comparison)"})
         if tr:
             tr.attempts.setdefault("spec_slide_degraded", []).append(o.n)
-        return build_slide(llm, brief, plain, outline, pool, brand_dir, prev, is_last, notes, cache, degraded=True, passages=passages, shapes_text=shapes_text)
+        return build_slide(llm, brief, plain, outline, pool, brand_dir, prev, is_last, notes, cache, degraded=True, passages=passages, photos=photos)
     cited = [pool[i] for i in o.finding_ids if i in pool]
     fb = _fallback_slide(llm, o, cited, pool, prev)
     if fb is not None:
@@ -181,7 +190,10 @@ def build_slide(llm: LLM, brief: Brief, o: OutlineSlide, outline: Outline, pool:
 
 def _accept(s: SlideSpec, vs: list[Violation], n: int, pool: dict[str, Finding], notes: dict | None, cache: Path | None) -> SlideSpec:
     _record(notes, "warnings", [{"outline_slide": n, "check": x.check, "category": x.category, "message": x.message[:200]} for x in vs])
-    s = s.model_copy(update={"source_caption": _caption(s.source_refs, pool), "speaker_notes": _with_provenance(s, pool)})
+    cap = _caption(s.source_refs, pool)
+    if s.photo:
+        cap = f"{cap} | {s.photo.credit}" if cap else s.photo.credit
+    s = s.model_copy(update={"source_caption": cap, "speaker_notes": _with_provenance(s, pool)})
     if cache:
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(s.model_dump_json(exclude_none=True, indent=1), encoding="utf-8")
@@ -251,7 +263,7 @@ def closing_from_titles(o: OutlineSlide, slides: list[SlideSpec], by_id: dict[st
 
 
 def generate_spec(llm: LLM, brief: Brief, outline: Outline, findings: Findings, brand_dir: Path,
-                  run_dir: Path | None = None, shapes_text: str = "") -> DeckSpec:
+                  run_dir: Path | None = None, photos=None) -> DeckSpec:
     by_id = {f.id: f for f in findings.findings if not f.excluded}  # outweighed or contested findings never reach slides
     slides: list[SlideSpec] = []
     dropped: list[dict] = []
@@ -269,7 +281,7 @@ def generate_spec(llm: LLM, brief: Brief, outline: Outline, findings: Findings, 
             o = o.model_copy(update={"finding_ids": earlier[:8] or o.finding_ids})
         try:
             slides.append(build_slide(llm, brief, o, outline, by_id, brand_dir, slides, o.n == last_n, notes, cache,
-                                      passages=findings.passages, shapes_text=shapes_text))
+                                      passages=findings.passages, photos=photos))
         except SpecGenerationError as e:
             if o.n == last_n and (cl := closing_from_titles(o, slides, by_id)) is not None:
                 slides.append(cl)

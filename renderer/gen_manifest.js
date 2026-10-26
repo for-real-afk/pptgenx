@@ -16,7 +16,7 @@ function build(brandDir) {
   const { LAYOUTS: L } = require(path.resolve(brandDir, "layouts.js"));
   const manifest = {
     layouts: L.map((l) => ({
-      name: l.name, dark: l.dark, use_when: l.use_when,
+      name: l.name, dark: l.dark, photo: l.photo || null, use_when: l.use_when,
       placeholders: l.placeholders.map((p) => ({ name: p.name, type: p.type, font_size: p.fontSize || null, max_chars: maxChars(p) })),
     })),
   };

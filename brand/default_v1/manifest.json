@@ -3,6 +3,7 @@
     {
       "name": "TITLE",
       "dark": true,
+      "photo": null,
       "use_when": "Opening slide: deck title and one-line subtitle.",
       "placeholders": [
         {
@@ -22,6 +23,7 @@
     {
       "name": "SECTION",
       "dark": true,
+      "photo": null,
       "use_when": "Section divider between major parts of a long deck.",
       "placeholders": [
         {
@@ -41,6 +43,7 @@
     {
       "name": "TITLE_ONLY",
       "dark": false,
+      "photo": null,
       "use_when": "Default content frame; compose cards, stats, timeline, comparison or icon rows below the title.",
       "placeholders": [
         {
@@ -54,6 +57,7 @@
     {
       "name": "CHART_COMMENTARY",
       "dark": false,
+      "photo": null,
       "use_when": "One native chart on the left with 2-4 commentary bullets on the right.",
       "placeholders": [
         {
@@ -77,8 +81,34 @@
       ]
     },
     {
+      "name": "PHOTO_TEXT",
+      "dark": false,
+      "photo": {
+        "x": 0.6,
+        "y": 1.65,
+        "w": 7.6,
+        "h": 4.85
+      },
+      "use_when": "One real photograph on the left (picked from the candidates offered for the slide) with 2-4 bullets on the right.",
+      "placeholders": [
+        {
+          "name": "title",
+          "type": "title",
+          "font_size": 28,
+          "max_chars": 124
+        },
+        {
+          "name": "body",
+          "type": "body",
+          "font_size": 16,
+          "max_chars": 684
+        }
+      ]
+    },
+    {
       "name": "TABLE",
       "dark": false,
+      "photo": null,
       "use_when": "A compact comparison table (max ~6 rows x 5 columns).",
       "placeholders": [
         {
@@ -98,6 +128,7 @@
     {
       "name": "CLOSING",
       "dark": true,
+      "photo": null,
       "use_when": "Conclusion and next steps; dark bookend.",
       "placeholders": [
         {
@@ -117,6 +148,7 @@
     {
       "name": "SOURCES",
       "dark": false,
+      "photo": null,
       "use_when": "Final slide listing sources actually used.",
       "placeholders": [
         {

@@ -57,6 +57,7 @@ class SlideDraft(_Flat):
     series: list[SeriesDraft] = Field(default_factory=list)
     table_header: list[str] = Field(default_factory=list)
     table_rows: list[RowDraft] = Field(default_factory=list)
+    photo_id: str = ""                                   # PHOTO_TEXT: id of one candidate photo offered for this slide
     speaker_notes: str = ""
     source_refs: list[str] = Field(default_factory=list)
 

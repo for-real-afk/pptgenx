@@ -60,7 +60,7 @@ def check_slide_v(s: SlideSpec, findings: dict[str, Finding], prev: list[SlideSp
     # body bullets
     body = s.placeholders.get("body")
     if isinstance(body, list) and s.layout != "SOURCES":
-        if s.layout == "CHART_COMMENTARY":
+        if s.layout in ("CHART_COMMENTARY", "PHOTO_TEXT"):
             nmax, cmax = capacity.commentary_limit()
         else:
             nmax, cmax = CONFIG.max_bullets, 400
@@ -119,6 +119,8 @@ def check_slide_v(s: SlideSpec, findings: dict[str, Finding], prev: list[SlideSp
             e.append(v("chart_table_caps", "every table row must have as many cells as the header"))
     if s.layout == "CHART_COMMENTARY" and not s.chart:
         e.append(v("layout_needs_content", "CHART_COMMENTARY needs a chart"))
+    if s.layout == "PHOTO_TEXT" and not (s.photo and isinstance(body, list) and body):
+        e.append(v("layout_needs_content", "PHOTO_TEXT needs a photo (photo_id from the candidates offered for this slide) and 2-4 bullets"))
     if s.layout == "TABLE" and not s.table:
         e.append(v("layout_needs_content", "TABLE layout needs a table"))
     if s.layout == "TITLE_ONLY" and not c:

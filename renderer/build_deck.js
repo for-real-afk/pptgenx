@@ -27,6 +27,8 @@ function verifySpec(spec, manifest) {
     if (!L) { errs.push(`${s.id}: unknown layout "${s.layout}"`); continue; }
     const known = new Set(L.placeholders.map((p) => p.name));
     for (const k of Object.keys(s.placeholders || {})) if (!known.has(k)) errs.push(`${s.id}: layout ${s.layout} has no placeholder "${k}"`);
+    if (s.photo && !L.photo) errs.push(`${s.id}: photo on layout without a photo frame`);
+    if (s.layout === "PHOTO_TEXT" && !s.photo) errs.push(`${s.id}: PHOTO_TEXT needs a photo`);
     if (s.chart && !known.has("chart")) errs.push(`${s.id}: chart on layout without chart placeholder`);
     if (s.table && !known.has("table")) errs.push(`${s.id}: table on layout without table placeholder`);
     if (s.composition && s.layout !== "TITLE_ONLY") errs.push(`${s.id}: composition requires TITLE_ONLY`);
@@ -97,6 +99,10 @@ async function buildDeck(spec, brandDir, outFile) {
     if (s.composition) await compose[s.composition.kind](ctx, s.composition.items, CONTENT);
     if (s.chart) addChart(slide, pres, theme, s.chart);
     if (s.table) addTable(slide, C, s.table);
+    if (s.photo) {
+      const box = layouts.LAYOUTS.find((l) => l.name === s.layout).photo;
+      slide.addImage({ path: s.photo.path, ...box, altText: s.photo.alt });
+    }
     if (s.source_caption) {
       slide.addText(s.source_caption, { isTextBox: true, margin: 0, x: MARGIN, y: SOURCE_Y, w: W - 2 * MARGIN - 1, h: 0.25, fontSize: 10, color: manifestDark[s.layout] ? C.background2 : C.accent3, valign: "middle", objectName: "Source caption" });
     }
