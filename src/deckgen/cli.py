@@ -203,6 +203,9 @@ def generate(
     typer.echo(f"\ndeck: {run_dir / 'deck.pptx'}\nimages: {run_dir / 'final' / 'images'}\nsources: {run_dir / 'sources.md'}")
 
 
+app.command("pipeline", help="The staged pipeline (v1): same as `generate`.")(generate)
+
+
 @app.command()
 def repair(run: str = typer.Option(..., help="finished run id under runs/ (needs deck_spec.final.json, findings.json, brief.json, outline.json)"),
            out: str = typer.Option(None, help="new run id for the repaired deck (default <run>-repaired)"),
@@ -343,6 +346,36 @@ def fixpass(run: str = typer.Option(..., help="finished run id under runs/"), ou
     ledger.write_summary(dst / "usage_summary.md")
     typer.echo(json.dumps(log, indent=1, ensure_ascii=False)[:3000])
     typer.echo(report_md(report))
+
+
+@app.command()
+def agent(topic: str = typer.Option(..., help="deck topic"), audience: str = typer.Option("general audience"), slides: int = typer.Option(14, help="maximum slides, incl. title, closing, sources"),
+          brand: str = typer.Option("default_v1"), run_id: str = typer.Option(None), yes: bool = typer.Option(False, "--yes", help="auto-approve the outline (logged)"),
+          budget: float = typer.Option(None, "--budget", help="hard USD cap for this run (default: config agent_budget_usd)"),
+          tier_overrides: str = typer.Option(None), estimate_only: bool = typer.Option(False, "--estimate", help="print the cost estimate and stop")) -> None:
+    """Single-agent loop (v2): research, write the whole deck, build, LOOK at every slide, fix, hand over. The staged pipeline is `deckgen pipeline`."""
+    import time
+
+    from deckgen.agent.run import estimate_agent, run_agent
+    from deckgen.ledger import Prices
+    from deckgen.pipeline import slug
+
+    cap = CONFIG.agent_budget_usd if budget is None else budget
+    roles = CONFIG.build_roles()
+    est = estimate_agent(CONFIG.agent_max_tool_calls, Prices.load(), roles["writer"].model, roles["extractor"].model)
+    typer.echo(f"estimate: upper ${est['upper_usd']}, typical ${est['typical_usd']} (budget ${cap}); assumptions: {est['assumptions']}")
+    if est["upper_usd"] > cap:
+        typer.echo("STOP: the upper estimate is over the budget. Raise --budget, lower DECKGEN_AGENT_MAX_TOOL_CALLS, or confirm you accept the budget guard stopping the run.")
+        if not estimate_only and not typer.confirm("Run anyway (the guard still stops at the budget)?", default=False):
+            raise typer.Exit(3)
+    if estimate_only:
+        raise typer.Exit(0)
+    rid = run_id or f"{slug(topic)}-agent-{time.strftime('%m%d-%H%M')}"
+    r = run_agent(topic, audience, slides, CONFIG.runs_dir / rid, budget=cap, yes=yes, brand=brand, tier_overrides=tier_overrides, echo=typer.echo)
+    from deckgen.agent.run import report_md
+
+    typer.echo(report_md(r))
+    typer.echo(f"deck: {CONFIG.runs_dir / rid / 'deck.pptx'}")
 
 
 @app.command("eval")

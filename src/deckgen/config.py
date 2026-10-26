@@ -81,6 +81,10 @@ class Config:
     photos: bool = os.environ.get("DECKGEN_PHOTOS", "1") == "1"                              # real photographs (Wikimedia Commons) on PHOTO_TEXT slides
     whole_deck: bool = os.environ.get("DECKGEN_WHOLE_DECK", "1") == "1"                      # one call writes the whole deck; per-slide writing only repairs hard failures
     hedge_contested: bool = os.environ.get("DECKGEN_HEDGE_CONTESTED", "1") == "1"            # equal-weight conflicts are hedged on the slide, not dropped
+    # single-agent loop (v2)
+    agent_budget_usd: float = _float("DECKGEN_AGENT_BUDGET_USD", 8.0)      # per run, inside the overall account cap
+    agent_max_tool_calls: int = _int("DECKGEN_AGENT_MAX_TOOL_CALLS", 150)
+    agent_max_seconds: int = _int("DECKGEN_AGENT_MAX_SECONDS", 2400)
     # QA
     qa_max_rounds: int = 3
     soffice_timeout: int = 120

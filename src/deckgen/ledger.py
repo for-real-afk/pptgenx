@@ -116,6 +116,17 @@ class Ledger:
                 self.echo(f"[budget] WARNING: {int(frac * 100)}% of the ${self.budget:.2f} cap used (${self.total:.2f})")
         return usd
 
+    def log_tool(self, name: str, latency_s: float, ok: bool, error: str = "") -> None:
+        """A tool call (search, fetch, build, ...) is logged beside the model calls; it costs nothing here (model calls it makes are recorded themselves)."""
+        row = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "pipeline_stage": self.stage, "role": "tool", "stage": name, "model": "-", "input_tokens": 0,
+               "output_tokens": 0, "cache_write_tokens": 0, "cache_read_tokens": 0, "cost_usd": 0.0, "latency_s": round(latency_s, 2), "cache": "miss",
+               "retry": 1, "outcome": "ok" if ok else "failed", "saved_usd": 0.0, "error": error[:200], "running_total_usd": round(self.total, 6)}
+        self.rows.append(row)
+        if self.path:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(row) + chr(10))
+
     # -- reporting -------------------------------------------------------------------------------------------------
     def stage_line(self, name: str) -> str:
         rows = [r for r in self.rows if r["pipeline_stage"] == name]
@@ -131,7 +142,7 @@ class Ledger:
         def agg(key):
             d = defaultdict(lambda: [0, 0, 0, 0.0])
             for r in self.rows:
-                if r["cache"] == "hit":
+                if r["cache"] == "hit" or r["role"] == "tool":
                     continue
                 x = d[r[key]]
                 x[0] += 1
@@ -146,13 +157,16 @@ class Ledger:
                 rows.append(f"| {k} | {c} | {i} | {o} | {u:.4f} |")
             return rows
 
-        live = [r for r in self.rows if r["cache"] != "hit"]
+        tools = [r for r in self.rows if r["role"] == "tool"]
+        live = [r for r in self.rows if r["cache"] != "hit" and r["role"] != "tool"]
         hits = [r for r in self.rows if r["cache"] == "hit"]
         cw = sum(r["cache_write_tokens"] for r in live)
         cr = sum(r["cache_read_tokens"] for r in live)
         waste = [r for r in live if r["outcome"] != "ok" or r["retry"] > 1]
         out = ["# Usage summary", "",
                f"Total **${self.total:.4f}** of the ${self.budget:.2f} cap ({100 * self.total / self.budget:.1f}%). Calls: {len(live)} paid, {len(hits)} served from the local prompt cache."]
+        if tools:
+            out += [f"Tool calls: {len(tools)} ({sum(t['outcome'] != 'ok' for t in tools)} failed)."]
         if self.aborted:
             out += ["", f"**ABORTED**: {self.aborted}"]
         out += [""] + table("By role", "role") + [""] + table("By model", "model") + [""] + table("By pipeline stage", "pipeline_stage")
