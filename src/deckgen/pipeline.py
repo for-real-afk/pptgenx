@@ -44,6 +44,22 @@ def _write(path: Path, model) -> None:
     path.write_text(model.model_dump_json(exclude_none=True, indent=1), encoding="utf-8")
 
 
+def _facts_text(llm, findings, run_dir: Path, ledger, force: int) -> str:
+    """The facts sheet (facts.json, cached): one wording per conflicting fact, hedges for single-source ones. Built once, before the writer."""
+    from deckgen.research.facts import Sheet, build_sheet
+
+    path = run_dir / "facts.json"
+    if path.exists() and STAGES.index("spec") < force:
+        return Sheet.model_validate_json(path.read_text(encoding="utf-8")).text()
+    if ledger:
+        ledger.stage = "facts"
+    sheet = build_sheet(llm, findings.findings)
+    path.write_text(sheet.model_dump_json(indent=1), encoding="utf-8")
+    if ledger:
+        ledger.stage_line("facts")
+    return sheet.text()
+
+
 def _photo_catalog(llm, brief, outline, run_dir: Path, ledger, force: int):
     """Candidate photos per slide from Wikimedia Commons (cached in photos.json). A search failure means no photos, never a failed run."""
     from deckgen.research.photos import Catalog, find_for_outline
@@ -86,7 +102,7 @@ def hedged_claims(spec: DeckSpec) -> int:
 def photo_status(photos, spec: DeckSpec) -> dict:
     """What happened with photos, plainly: skipped, failed, or how many were searched / offered / placed."""
     if photos is None:
-        return {"status": "disabled (DECKGEN_PHOTOS=0)"}
+        return {"status": "not attempted (spec reused, or DECKGEN_PHOTOS=0)"}
     errors = [e["error"] for e in photos.log if not e.get("ok", True)]
     placed = sum(bool(s.photo) for s in spec.slides)
     return {"status": "ok" if not errors else "problems", "searches": sum("query" in e for e in photos.log), "offered": sum(len(c) for c in photos.cands.values()),
@@ -124,8 +140,10 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
     ids = {f.id for f in findings.findings if not f.excluded}
     outline = stage("outline", run_dir / "outline.json", Outline, lambda: outliner.approve(
         outliner.outline(llm, brief, findings), brief, ids, run_dir / "outline.json", auto_approve, confirm, edit))
-    photos = _photo_catalog(llm, brief, outline, run_dir, ledger, force) if CONFIG.photos else None
-    spec = stage("spec", run_dir / "deck_spec.json", DeckSpec, lambda: generate_spec(llm, brief, outline, findings, brand_dir, run_dir, photos=photos))
+    spec_reused = (run_dir / "deck_spec.json").exists() and STAGES.index("spec") < force   # a repaired/resumed spec needs neither facts nor photos
+    facts_text = "" if spec_reused else _facts_text(llm, findings, run_dir, ledger, force)
+    photos = _photo_catalog(llm, brief, outline, run_dir, ledger, force) if CONFIG.photos and not spec_reused else None
+    spec = stage("spec", run_dir / "deck_spec.json", DeckSpec, lambda: generate_spec(llm, brief, outline, findings, brand_dir, run_dir, photos=photos, facts_text=facts_text))
 
     if photos is not None:  # per-photo status (searches, downloads, failures) is written after the spec stage has used the catalog
         (run_dir / "photos.json").write_text(photos.to_json(), encoding="utf-8")

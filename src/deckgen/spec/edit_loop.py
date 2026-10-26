@@ -3,6 +3,8 @@ specific fields (shorten or delete text, or cite more findings), never a rewrite
 A candidate is accepted only if it does not make the slide worse on hard gates (correctness first); the best version is kept."""
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from deckgen.config import CONFIG
@@ -41,8 +43,8 @@ def score(vs: list[Violation]) -> tuple[int, int]:
     return sum(x.is_hard_correctness for x in vs), len(hard(vs))
 
 
-def propose(llm: LLM, s: SlideSpec, vs: list[Violation], findings: dict[str, Finding], pool_hint: str = "", source_text: str = "") -> SpecEdits:
-    cited = "\n".join(f"{r}: {findings[r].claim}" for r in s.source_refs if r in findings)
+def propose(llm: LLM, s: SlideSpec, vs: list[Violation], findings: dict[str, Finding], pool_hint: str = "", source_text: str = "", facts_text: str = "") -> SpecEdits:
+    cited = "\n".join(f"{r} [{urlparse(findings[r].source_url).netloc.removeprefix("www.")}]: {findings[r].claim}" for r in s.source_refs if r in findings)
     issues = "\n".join(f"- [{x.check}] {x.message}" for x in hard(vs)[:10])
     prompt = (
         "Fix ONLY the violations listed, with the fewest edits. Allowed: replace a text field with wording that has the same number of "
@@ -51,6 +53,7 @@ def propose(llm: LLM, s: SlideSpec, vs: list[Violation], findings: dict[str, Fin
         "/title, /placeholders/body/1, /composition/items/2/body.\n"
         f"SLIDE:\n{s.model_dump_json(exclude_none=True)}\n\nVIOLATIONS:\n{issues}\n\nCITED FINDINGS:\n{cited}\n"
         + (f"\nOTHER AVAILABLE FINDINGS (for `cite` or for exact wording):\n{pool_hint}\n" if pool_hint else "")
+        + (f"{chr(10)}{facts_text}{chr(10)}" if facts_text else "")
         + (f"{chr(10)}SOURCE PASSAGES you may take exact wording from:{chr(10)}{source_text}{chr(10)}" if source_text else "")
     )
     return llm.generate(stage="fixer", system=SYSTEM, prompt=prompt, schema=SpecEdits)

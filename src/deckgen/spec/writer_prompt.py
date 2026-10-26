@@ -41,9 +41,9 @@ HEDGING = (
     "and name the sources in speaker_notes. Findings with a higher tier and more independent origins win over weaker ones.")
 
 
-def stable_prefix(style: str, menu: str, limits: str) -> str:
+def stable_prefix(style: str, menu: str, limits: str, facts_text: str = "") -> str:
     return (f"STYLE GUIDE:{NL}{style}{NL}{NL}LAYOUTS:{NL}{menu}{NL}{NL}FIELD LIMITS:{NL}{limits}{NL}{NL}"
-            + HOW_TO_FILL + (LAYOUT_CHOICE if CONFIG.writer_chooses_layout else "") + TITLES + HEDGING + NL + NL)
+            + HOW_TO_FILL + (LAYOUT_CHOICE if CONFIG.writer_chooses_layout else "") + TITLES + HEDGING + NL + NL + (facts_text + NL + NL if facts_text else ""))
 
 
 def select_source_text(passages: dict[str, list[str]], urls: list[str], query: str, k: int = 6, max_chars: int = 7000) -> str:

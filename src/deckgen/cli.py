@@ -203,6 +203,61 @@ def generate(
     typer.echo(f"\ndeck: {run_dir / 'deck.pptx'}\nimages: {run_dir / 'final' / 'images'}\nsources: {run_dir / 'sources.md'}")
 
 
+@app.command()
+def repair(run: str = typer.Option(..., help="finished run id under runs/ (needs deck_spec.final.json, findings.json, brief.json, outline.json)"),
+           out: str = typer.Option(None, help="new run id for the repaired deck (default <run>-repaired)"),
+           tier_overrides: str = typer.Option(None, help="same per-topic tier overrides as the original run"),
+           budget: float = typer.Option(None, "--budget", help="hard USD cap (counts the copied usage of the source run too)")) -> None:
+    """Repair pass on a finished deck: facts sheet, then up to 2 rounds of small-diff fixes for contradictions, unexplained references and
+    title mismatches (cross-slide checker re-run each round), then QA, rebuild and report in a new run dir."""
+    import json
+    import shutil
+
+    from deckgen.ledger import BudgetAbort
+    from deckgen.llm import Tracer, make_llm
+    from deckgen.pipeline import Request, report_md, run_pipeline
+    from deckgen.research.facts import Sheet, build_sheet
+    from deckgen.schemas import DeckSpec
+    from deckgen.schemas.research import Brief, Findings, Outline
+    from deckgen.spec.repair import repair_deck, write_log
+
+    src, dst = CONFIG.runs_dir / run, CONFIG.runs_dir / (out or f"{run}-repaired")
+    dst.mkdir(parents=True, exist_ok=True)
+    for name in ("brief.json", "findings.json", "outline.json", "facts.json", "usage.jsonl", "deck_notes.json"):
+        if (src / name).exists():
+            shutil.copy(src / name, dst / name)
+    brief = Brief.model_validate_json((dst / "brief.json").read_text(encoding="utf-8"))
+    outline = Outline.model_validate_json((dst / "outline.json").read_text(encoding="utf-8"))
+    findings = Findings.model_validate_json((dst / "findings.json").read_text(encoding="utf-8"))
+    spec = DeckSpec.model_validate_json((src / "deck_spec.final.json").read_text(encoding="utf-8"))
+    ledger = make_ledger(dst, budget)
+    llm = make_llm(Tracer(dst / "trace.jsonl"), ledger)
+    try:
+        if not (dst / "facts.json").exists():
+            ledger.stage = "facts"
+            (dst / "facts.json").write_text(build_sheet(llm, findings.findings).model_dump_json(indent=1), encoding="utf-8")
+            ledger.stage_line("facts")
+        sheet = Sheet.model_validate_json((dst / "facts.json").read_text(encoding="utf-8"))
+        ledger.stage = "repair"
+        fixed, rep = repair_deck(llm, spec, brief, outline, findings, CONFIG.brands_dir / brief.brand, sheet.text())
+        ledger.stage_line("repair")
+        write_log(dst / "repair_log.json", rep)
+        (dst / "deck_spec.json").write_text(fixed.model_dump_json(exclude_none=True, indent=1), encoding="utf-8")
+        notes_path = dst / "deck_notes.json"
+        notes = json.loads(notes_path.read_text(encoding="utf-8")) if notes_path.exists() else {}
+        notes.update({"unresolved": rep["unresolved"], "repair": {"before": rep["before"], "after": rep["after"]}})
+        notes_path.write_text(json.dumps(notes, indent=1), encoding="utf-8")
+        report = run_pipeline(Request(brief.topic, brief.audience, brief.slide_count, brief.brand, tier_overrides=tier_overrides), llm, make_tools(), dst,
+                              auto_approve=True, do_qa=True, ledger=ledger)
+    except BudgetAbort as e:
+        ledger.write_summary(dst / "usage_summary.md")
+        typer.echo(f"ABORTED BEFORE SPENDING OVER THE CAP: {e}")
+        raise typer.Exit(2)
+    ledger.write_summary(dst / "usage_summary.md")
+    typer.echo(f"contradictions before {rep['before'].get('contradiction', 0)} -> after {rep['after'].get('contradiction', 0)}; all kinds {rep['before']} -> {rep['after']}")
+    typer.echo(report_md(report))
+
+
 @app.command("eval")
 def eval_(golden: Path = typer.Option(Path("evals/golden_topics.json")), only: str = typer.Option(None, help="substring of topic"),
           runs: int = typer.Option(3, help="runs per topic (run 1 does the research)")) -> None:

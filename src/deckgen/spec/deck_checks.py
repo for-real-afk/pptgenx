@@ -18,7 +18,7 @@ SKIP = ("TITLE", "SECTION", "SOURCES", "CLOSING")
 
 class Problem(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["contradiction", "redundancy", "unclear_reference"]
+    kind: Literal["contradiction", "redundancy", "unclear_reference", "title_mismatch"]
     slides: list[int] = Field(min_length=1, max_length=4, description="1-based slide numbers involved")
     description: str
 
@@ -95,7 +95,7 @@ def consistency(llm: LLM, spec: DeckSpec, findings: dict[str, Finding]) -> list[
         "Find problems BETWEEN slides: (1) contradiction: two slides state incompatible facts, or the same quantity with "
         "different values (for example two different power figures, or different accounts of who withdrew); (2) unclear_reference: "
         "a statement that cannot be understood without context the deck never gives (for example 'the accident' with no earlier "
-        "mention); (3) redundancy: the same point made on more than one slide. Only report real problems; return an empty list "
+        "mention); (3) redundancy: the same point made on more than one slide; (4) title_mismatch: a slide whose title promises something its content does not deliver (a count, a scope, a claim the body does not state). Only report real problems; return an empty list "
         "if there are none. Give the slide numbers involved and one sentence."
     )
     return llm.generate(stage="deck_consistency", system="You review a whole deck for internal consistency. Output JSON only.",

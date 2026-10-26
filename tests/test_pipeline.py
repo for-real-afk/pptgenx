@@ -69,7 +69,7 @@ def script():
         "research_query": lambda prompt, images: QueryPlan(queries=["group b q" + re.search(r"question (\d)", prompt).group(1)]),
         "research_extract": extract,
         "research_crosscheck": ConflictReport(links=[]),
-        "research_conflict_pairs": {"contradictions": []},
+        "research_conflict_pairs": {"contradictions": []}, "facts_sheet": {"groups": []},
         "outline": Outline(arc="rise-peak-fall-legacy", deck_title="Group B in brief", slides=[
             OutlineSlide(n=1, section="Open", purpose="Title", key_message="Intro", layout_hint="TITLE"),
             OutlineSlide(n=2, section="Open", purpose="Ideas", key_message="Ideas", finding_ids=["f01", "f02"], layout_hint="TITLE_ONLY"),
