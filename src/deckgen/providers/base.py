@@ -15,6 +15,8 @@ class RawResult:
     tokens_out: int = 0
     model: str = ""
     # rate-limit state the provider reported, normalised: remaining tokens and seconds until reset (None = unknown)
+    cache_write_tokens: int = 0  # provider prompt cache: tokens written to / read from the cache (billed at their own prices)
+    cache_read_tokens: int = 0
     remaining_tokens: int | None = None
     reset_seconds: float | None = None
     raw_headers: dict = field(default_factory=dict)
@@ -36,7 +38,7 @@ class Adapter(Protocol):
     name: str
 
     def complete(self, *, model: str, system: str, prompt: str, images: list[Path] | None, temperature: float,
-                 seed: int | None, max_tokens: int, schema_json: str | None) -> RawResult: ...
+                 seed: int | None, max_tokens: int, schema_json: str | None, cache_prefix: str = "") -> RawResult: ...
 
     def list_models(self) -> list[str]: ...
 

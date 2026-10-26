@@ -164,6 +164,7 @@ def judge_pairs(llm: LLM, findings: list[Finding], pairs: list[tuple[int, int]])
 def resolve(findings: list[Finding], confirmed: set[frozenset]) -> tuple[list[Finding], list[ConflictRecord]]:
     by_id = {f.id: f for f in findings}
     excluded: dict[str, str] = {}
+    contested: set[str] = set()
     records: list[ConflictRecord] = []
     links: dict[str, set[str]] = {}
     for pair in sorted(confirmed, key=lambda p: sorted(p)):
@@ -179,11 +180,14 @@ def resolve(findings: list[Finding], confirmed: set[frozenset]) -> tuple[list[Fi
             excluded.setdefault(lose.id, f"outweighed by {win.id}: tier {win.tier} vs {lose.tier}, origins {win.independent_origin_count} vs {lose.independent_origin_count}")
             records.append(ConflictRecord(**rec, status="resolved", winner=win.id, reason=excluded[lose.id]))
         else:
-            for f, other in ((a, b), (b, a)):
-                excluded.setdefault(f.id, f"contested with {other.id}: equal weight {wa}")
+            if CONFIG.hedge_contested:
+                contested.update({a.id, b.id})  # keep both: the slide hedges ("sources differ") and the speaker notes name the sources
+            else:
+                for f, other in ((a, b), (b, a)):
+                    excluded.setdefault(f.id, f"contested with {other.id}: equal weight {wa}")
             records.append(ConflictRecord(**rec, status="unresolved", reason=f"equal weight {wa}: sources differ, attribute or omit"))
     out = [f.model_copy(update={"conflicts_with": sorted(links.get(f.id, [])), "excluded": f.id in excluded,
-                                "excluded_reason": excluded.get(f.id, "")}) for f in findings]
+                                "excluded_reason": excluded.get(f.id, ""), "contested": f.id in contested}) for f in findings]
     return out, records
 
 

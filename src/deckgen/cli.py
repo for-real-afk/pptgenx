@@ -37,6 +37,34 @@ def _check_models() -> list[bool]:
     return out
 
 
+def _check_costs() -> list[bool]:
+    """Anthropic roles: key present (never printed) and a price for every model (the ledger never guesses)."""
+    import os
+
+    from deckgen.ledger import Prices
+
+    models = sorted({r.model for r in CONFIG.build_roles().values() if r.provider == "anthropic"})
+    if not models:
+        return []
+    out = [_check("ANTHROPIC_API_KEY set", bool(os.environ.get("ANTHROPIC_API_KEY")), "add it to .env")]
+    missing = Prices.load().missing(models)
+    out.append(_check("prices.yaml complete for " + ", ".join(models), not missing, "; ".join(missing)))
+    return out
+
+
+@app.command()
+def estimate(slides: int = typer.Option(14), limit: float = typer.Option(20.0, help="ask before spending if the UPPER estimate exceeds this")) -> None:
+    """Dry cost estimate from prices.yaml and the configured roles. Spends nothing."""
+    from deckgen.estimate import estimate as est, table
+    from deckgen.ledger import Prices
+
+    e = est(slides, CONFIG.build_roles(), Prices.load())
+    typer.echo(table(e))
+    if e["upper_usd"] > limit:
+        typer.echo(f"STOP: upper estimate ${e['upper_usd']} > ${limit}. Ask before running.")
+        raise typer.Exit(3)
+
+
 @app.command()
 def checks(profile: str = typer.Option(None, help="strict | demoted")) -> None:
     """Print the check registry: category and severity of every check."""
@@ -63,6 +91,7 @@ def doctor() -> None:
     except soffice.RenderError as e:
         results.append(_check("render backend", False, str(e)))
     results += _check_models()
+    results += _check_costs()
     for d in (Path(tempfile.gettempdir()), CONFIG.runs_dir):
         d.mkdir(parents=True, exist_ok=True)
         probe = d / ".deckgen_probe"
@@ -105,6 +134,16 @@ def qa(run: str = typer.Option(None, help="run id under runs/ containing deck_sp
     raise typer.Exit(1 if report.render_error or report.file_errors or policy.blocking(report.remaining) else 0)
 
 
+def _uses_anthropic() -> bool:
+    return any(r.provider == "anthropic" for r in CONFIG.build_roles().values())
+
+
+def make_ledger(run_dir: Path, budget: float | None):
+    from deckgen.ledger import Ledger, Prices
+
+    return Ledger(run_dir / "usage.jsonl", Prices.load(), CONFIG.budget_usd if budget is None else budget, echo=typer.echo)
+
+
 def make_tools() -> "ResearchTools":
     from deckgen.research.tools import Budget, HttpFetcher, ResearchTools, TavilySearch
 
@@ -123,6 +162,7 @@ def generate(
     auto_approve: bool = typer.Option(False, help="skip the outline approval prompt"),
     qa_loop: bool = typer.Option(True, "--qa/--no-qa"),
     no_cache: bool = typer.Option(False, "--no-cache", help="ignore and do not write the LLM response cache"),
+    budget: float = typer.Option(None, "--budget", help="hard USD cap for the whole run (default: config budget_usd). Enables the cost ledger."),
 ) -> None:
     """Topic -> researched, sourced, QA'd .pptx under runs/<run_id>/."""
     import time
@@ -137,11 +177,27 @@ def generate(
         import os
 
         os.environ["DECKGEN_NO_CACHE"] = "1"  # read by Config at import; also pass use_cache explicitly below
-    llm = make_llm(Tracer(run_dir / "trace.jsonl"))
+    ledger = make_ledger(run_dir, budget) if (budget is not None or _uses_anthropic()) else None
+    llm = make_llm(Tracer(run_dir / "trace.jsonl"), ledger)
     if no_cache:
         llm.use_cache = False
-    report = run_pipeline(Request(topic, audience, slides, brand), llm, make_tools(), run_dir,
-                          auto_approve=auto_approve, from_stage=from_stage, do_qa=qa_loop)
+    from deckgen.ledger import BudgetAbort
+
+    try:
+        report = run_pipeline(Request(topic, audience, slides, brand), llm, make_tools(), run_dir,
+                              auto_approve=auto_approve, from_stage=from_stage, do_qa=qa_loop, ledger=ledger)
+    except BudgetAbort as e:
+        ledger.write_summary(run_dir / "usage_summary.md")
+        typer.echo(f"ABORTED BEFORE SPENDING OVER THE CAP: {e}")
+        typer.echo(f"see {run_dir / 'usage_summary.md'}")
+        raise typer.Exit(2)
+    except BaseException:
+        if ledger:
+            ledger.aborted = ledger.aborted or "run failed (see error); partial usage below"
+            ledger.write_summary(run_dir / "usage_summary.md")
+        raise
+    if ledger:
+        ledger.write_summary(run_dir / "usage_summary.md")
     typer.echo(report_md(report))
     typer.echo(f"\ndeck: {run_dir / 'deck.pptx'}\nimages: {run_dir / 'final' / 'images'}\nsources: {run_dir / 'sources.md'}")
 

@@ -13,7 +13,8 @@ class Adapter:
         self.remaining: int | None = None
         self.reset: float | None = None
 
-    def complete(self, *, model, system, prompt, images, temperature, seed, max_tokens, schema_json):
+    def complete(self, *, model, system, prompt, images, temperature, seed, max_tokens, schema_json, cache_prefix=""):
+        prompt = cache_prefix + prompt
         self.calls.append({"model": model, "system": system, "prompt": prompt, "temperature": temperature, "seed": seed})
         item = self.script.pop(0) if self.script else "{}"
         if isinstance(item, Exception):

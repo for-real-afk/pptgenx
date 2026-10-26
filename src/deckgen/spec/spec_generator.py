@@ -27,6 +27,9 @@ from deckgen.spec.edit_loop import check_all, edit_loop, propose, score
 from deckgen.spec.rules import check_slide_v
 from deckgen.spec.validate_spec import load_manifest, validate_spec
 from deckgen.spec.violations import Violation, classify_failure, hard, v
+from deckgen.spec.writer_prompt import select_source_text, stable_prefix, variable_part
+
+NL = chr(10)
 
 SYSTEM = ("You write one presentation slide as JSON. Every statement on the slide must restate something the provided "
           "findings say. Do not add background, context, causes, consequences, rankings or adjectives of your own, even if "
@@ -78,35 +81,6 @@ def pool_listing(by_id: dict[str, Finding], limit: int | None = None) -> str:
                      for f in order[: limit or CONFIG.pool_prompt_max])
 
 
-def _write_prompt(brief: Brief, o: OutlineSlide, outline: Outline, preferred: list[Finding], pool_text: str, menu: str, limits: str,
-                  style: str, prev: list[SlideSpec], is_last: bool, feedback: list[str]) -> str:
-    recent = ", ".join(f"{p.layout}/{p.composition.kind if p.composition else '-'}" for p in prev[-3:]) or "none yet"
-    used_before = sorted({r for p in prev for r in p.source_refs})
-    facts = "\n".join(f"{f.id} [{f.confidence}] {f.claim} | evidence: {f.evidence_snippet}" for f in preferred) or "(none)"
-    p = (
-        f"STYLE GUIDE:\n{style}\n\nLAYOUTS:\n{menu}\n\nFIELD LIMITS:\n{limits}\n\n"
-        "HOW TO FILL THE FLAT SLIDE JSON: set layout. TITLE/SECTION: title + subtitle. CLOSING: title + bullets (3-4 forward-looking "
-        "points that are each supported by a cited finding; if the findings cannot support a forward-looking point, write FEWER bullets "
-        "rather than inventing one). TITLE_ONLY: comp_kind in {cards (2,3,4 or 6 items: icon, heading, body), icon_rows (2-5 items: "
-        "icon, heading, body), stats (2-4 items: value, label, optional detail), timeline (3-5 items: year, heading, body), "
-        "comparison (exactly 2 items: heading, bullets)}; leave unused item fields empty. CHART_COMMENTARY: chart_type "
-        "(bar/column/line/pie/doughnut), chart_title, categories, series [{name, values}], bullets. TABLE: table_header + "
-        "table_rows [{cells}]. Always: id, section, title, speaker_notes (2-4 sentences with the detail), source_refs "
-        "(ids of the findings you actually used).\n\n"
-        f"DECK: {outline.deck_title} | audience: {brief.audience}\n"
-        f"THIS SLIDE: n={o.n} id=s{o.n:02d} section='{o.section}' layout_hint={o.layout_hint} purpose: {o.purpose}\n"
-        f"Key message: {o.key_message}\nRecent layouts used: {recent} (vary them).\n"
-        + (f"Findings already relied on by earlier slides: {used_before} - do not build this slide's main claim on them.\n" if used_before else "")
-        + ("This is the closing slide: layout CLOSING.\n" if is_last else "")
-        + (f"DATA HINT: {o.data_hint}\n" if getattr(o, "data_hint", "") else "")
-        + f"\nFINDINGS ASSIGNED TO THIS SLIDE (full detail):\n{facts}\n"
-        + f"\nFULL FINDINGS POOL, best first (id [tier, independent origins] claim). Cite any of these you use; prefer concrete facts over filler:\n{pool_text}\n"
-    )
-    if feedback:
-        p += "\nYour previous attempt could not be used. Fix ALL of these:\n- " + "\n- ".join(feedback[:10])
-    return p
-
-
 def _caption(refs: list[str], findings: dict[str, Finding]) -> str | None:
     doms: list[str] = []
     for r in refs:
@@ -140,15 +114,19 @@ def sources_slide(n: int, used: list[Finding]) -> SlideSpec:
 
 
 def write_slide(llm: LLM, brief: Brief, o: OutlineSlide, outline: Outline, pool: dict[str, Finding], brand_dir: Path,
-                prev: list[SlideSpec], is_last: bool, feedback: list[str] | None = None) -> SlideSpec:
-    """One writing pass (two only if the output cannot be converted to a slide). Quality problems are fixed afterwards by diffs."""
+                prev: list[SlideSpec], is_last: bool, feedback: list[str] | None = None, passages: dict | None = None,
+                shapes_text: str = "") -> SlideSpec:
+    """One writing pass (two only if the output cannot be converted to a slide). Quality problems are fixed afterwards by diffs.
+    The stable prefix (style, layouts, limits, rules) is identical for every slide and is cached; the rest varies per slide."""
     style = (brand_dir / "style_guide.md").read_text(encoding="utf-8")
     preferred = [pool[i] for i in o.finding_ids if i in pool]
+    source_text = select_source_text(passages or {}, sorted({f.source_url for f in preferred}), f"{o.key_message} {o.purpose}") if CONFIG.writer_source_text else ""
+    prefix = stable_prefix(style, _layout_menu(brand_dir), _limits_menu())
     errors = list(feedback or [])
     for _ in range(2):
-        prompt = _write_prompt(brief, o, outline, preferred, pool_listing(pool), _layout_menu(brand_dir), _limits_menu(), style, prev, is_last, errors)
+        prompt = variable_part(brief, o, outline, preferred, pool_listing(pool), prev, is_last, errors, source_text, shapes_text)
         try:
-            d = llm.generate(stage="spec_slide", system=SYSTEM, prompt=prompt, schema=SlideDraft)
+            d = llm.generate(stage="spec_slide", system=SYSTEM, prompt=prompt, schema=SlideDraft, cache_prefix=prefix)
             return draft_to_slide(d.model_copy(update={"id": f"s{o.n:02d}", "section": o.section}))
         except ValueError as e:  # DraftConversionError is a ValueError too: both mean "not a usable slide yet"
             errors = [f"your output could not be used ({str(e)[:200]}); return only the fields in the schema"]
@@ -167,13 +145,13 @@ def _correct(s: SlideSpec, findings: dict[str, Finding], prev: list[SlideSpec]) 
 
 def build_slide(llm: LLM, brief: Brief, o: OutlineSlide, outline: Outline, pool: dict[str, Finding], brand_dir: Path,
                 prev: list[SlideSpec], is_last: bool, notes: dict | None = None, cache: Path | None = None,
-                degraded: bool = False) -> SlideSpec:
+                degraded: bool = False, passages: dict | None = None, shapes_text: str = "") -> SlideSpec:
     """Write once, check, fix with diffs, keep the best. See the module docstring for the failure sequence."""
     if cache and cache.exists() and not degraded:
         return SlideSpec.model_validate_json(cache.read_text(encoding="utf-8"))
     manifest = load_manifest(brand_dir)
     tr = getattr(llm, "tracer", None)
-    s = write_slide(llm, brief, o, outline, pool, brand_dir, prev, is_last)
+    s = write_slide(llm, brief, o, outline, pool, brand_dir, prev, is_last, passages=passages, shapes_text=shapes_text)
     vs = check_all(llm, s, pool, prev, manifest, outline.deck_title, brief.brand)
     s, vs, rounds, rejected = edit_loop(llm, s, vs, pool, prev, manifest, outline.deck_title, brief.brand, pool_listing(pool, 40))
     if rejected:
@@ -189,7 +167,7 @@ def build_slide(llm: LLM, brief: Brief, o: OutlineSlide, outline: Outline, pool:
         plain = o.model_copy(update={"layout_hint": "TITLE_ONLY", "purpose": o.purpose + " (NO chart or table: the findings cannot ground the numbers; use cards, icon_rows or comparison)"})
         if tr:
             tr.attempts.setdefault("spec_slide_degraded", []).append(o.n)
-        return build_slide(llm, brief, plain, outline, pool, brand_dir, prev, is_last, notes, cache, degraded=True)
+        return build_slide(llm, brief, plain, outline, pool, brand_dir, prev, is_last, notes, cache, degraded=True, passages=passages, shapes_text=shapes_text)
     cited = [pool[i] for i in o.finding_ids if i in pool]
     fb = _fallback_slide(llm, o, cited, pool, prev)
     if fb is not None:
@@ -203,11 +181,24 @@ def build_slide(llm: LLM, brief: Brief, o: OutlineSlide, outline: Outline, pool:
 
 def _accept(s: SlideSpec, vs: list[Violation], n: int, pool: dict[str, Finding], notes: dict | None, cache: Path | None) -> SlideSpec:
     _record(notes, "warnings", [{"outline_slide": n, "check": x.check, "category": x.category, "message": x.message[:200]} for x in vs])
-    s = s.model_copy(update={"source_caption": _caption(s.source_refs, pool)})
+    s = s.model_copy(update={"source_caption": _caption(s.source_refs, pool), "speaker_notes": _with_provenance(s, pool)})
     if cache:
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(s.model_dump_json(exclude_none=True, indent=1), encoding="utf-8")
     return s
+
+
+def _with_provenance(s: SlideSpec, pool: dict[str, Finding]) -> str:
+    """Every slide's speaker notes end with the sources behind it, and say which claims are contested or single-source."""
+    refs = [pool[r] for r in s.source_refs if r in pool]
+    if not refs or "Sources:" in s.speaker_notes:
+        return s.speaker_notes
+    seen: dict[str, Finding] = {}
+    for f in refs:
+        seen.setdefault(f.source_url, f)
+    line = "Sources: " + "; ".join(f"{f.id} {f.source_title or domain(f.source_url)} ({f.source_url})" for f in seen.values())
+    flags = [f"{f.id} contested (sources differ)" if f.contested else f"{f.id} single weak source" for f in refs if f.contested or f.needs_review]
+    return (s.speaker_notes.rstrip() + NL + line + (NL + "Verify: " + ", ".join(flags) if flags else "")).strip()
 
 
 class _Labels(BaseModel):
@@ -260,7 +251,7 @@ def closing_from_titles(o: OutlineSlide, slides: list[SlideSpec], by_id: dict[st
 
 
 def generate_spec(llm: LLM, brief: Brief, outline: Outline, findings: Findings, brand_dir: Path,
-                  run_dir: Path | None = None) -> DeckSpec:
+                  run_dir: Path | None = None, shapes_text: str = "") -> DeckSpec:
     by_id = {f.id: f for f in findings.findings if not f.excluded}  # outweighed or contested findings never reach slides
     slides: list[SlideSpec] = []
     dropped: list[dict] = []
@@ -277,7 +268,8 @@ def generate_spec(llm: LLM, brief: Brief, outline: Outline, findings: Findings, 
                              key=lambda r: (-by_id[r].tier, -by_id[r].independent_origin_count, by_id[r].needs_review))
             o = o.model_copy(update={"finding_ids": earlier[:8] or o.finding_ids})
         try:
-            slides.append(build_slide(llm, brief, o, outline, by_id, brand_dir, slides, o.n == last_n, notes, cache))
+            slides.append(build_slide(llm, brief, o, outline, by_id, brand_dir, slides, o.n == last_n, notes, cache,
+                                      passages=findings.passages, shapes_text=shapes_text))
         except SpecGenerationError as e:
             if o.n == last_n and (cl := closing_from_titles(o, slides, by_id)) is not None:
                 slides.append(cl)

@@ -53,27 +53,27 @@ def test_stages_route_to_their_role_and_models_are_traced(tmp_path, two_fakes):
 def test_cache_hit_means_zero_provider_calls_and_no_cache_disables_it(tmp_path, two_fakes):
     a, _ = two_fakes
     a.script = ['{"x": 5}']
-    assert make(tmp_path).generate(stage="plan", system="s", prompt="p", schema=Out).x == 5
+    assert make(tmp_path).generate(stage="outline", system="s", prompt="p", schema=Out).x == 5
     again = make(tmp_path)  # a fresh run: new object, same cache dir
-    assert again.generate(stage="plan", system="s", prompt="p", schema=Out).x == 5
+    assert again.generate(stage="outline", system="s", prompt="p", schema=Out).x == 5
     assert len(a.calls) == 1 and again.tracer.role_summary()["writer"]["cache_hits"] == 1
     a.script = ['{"x": 6}']
-    assert make(tmp_path, use_cache=False).generate(stage="plan", system="s", prompt="p", schema=Out).x == 6 and len(a.calls) == 2
+    assert make(tmp_path, use_cache=False).generate(stage="outline", system="s", prompt="p", schema=Out).x == 6 and len(a.calls) == 2
 
 
 def test_invalid_output_is_retried_with_the_validation_error(tmp_path, two_fakes):
     a, _ = two_fakes
     a.script = ['{"x": "not an int"}', '{"x": 3}']
     llm = make(tmp_path)
-    assert llm.generate(stage="plan", system="s", prompt="p", schema=Out).x == 3
-    assert "previous output was invalid" in a.calls[1]["prompt"] and llm.tracer.attempts["plan"] == [2]
+    assert llm.generate(stage="outline", system="s", prompt="p", schema=Out).x == 3
+    assert "previous output was invalid" in a.calls[1]["prompt"] and llm.tracer.attempts["outline"] == [2]
 
 
 def test_429_waits_and_retries_instead_of_failing(tmp_path, two_fakes):
     a, _ = two_fakes
     a.script = [RateLimited(7.0), '{"x": 1}']
     sleeps: list = []
-    assert make(tmp_path, sleeps=sleeps).generate(stage="plan", system="s", prompt="p", schema=Out).x == 1
+    assert make(tmp_path, sleeps=sleeps).generate(stage="outline", system="s", prompt="p", schema=Out).x == 1
     assert sleeps and sleeps[0] >= 7.0
 
 
@@ -101,20 +101,20 @@ def test_daily_quota_falls_back_unless_models_are_pinned(tmp_path, two_fakes, mo
     r = roles()
     r["writer"] = RoleSpec(provider="fakea", model="m1", fallbacks=(("fakeb", "m2"),))
     a.script, b.script = [RateLimited(1, daily=True)], ['{"x": 9}']
-    assert make(tmp_path, r).generate(stage="plan", system="s", prompt="p", schema=Out).x == 9
+    assert make(tmp_path, r).generate(stage="outline", system="s", prompt="p", schema=Out).x == 9
     a.script = [RateLimited(1, daily=True)]
     monkeypatch.setattr(llm_mod, "CONFIG", config_mod.Config(pin_models=True))
     with pytest.raises(QuotaExhausted):
-        make(tmp_path / "pinned", r).generate(stage="plan", system="s", prompt="p-pinned", schema=Out)
+        make(tmp_path / "pinned", r).generate(stage="outline", system="s", prompt="p-pinned", schema=Out)
 
 
 def test_budget_guard_stops_a_role(tmp_path, two_fakes):
     a, _ = two_fakes
     a.script = ['{"x": 1}', '{"x": 2}']
     llm = make(tmp_path, budgets={"writer": {"calls": 1}})
-    llm.generate(stage="plan", system="s", prompt="p1", schema=Out)
+    llm.generate(stage="outline", system="s", prompt="p1", schema=Out)
     with pytest.raises(BudgetExceeded):
-        llm.generate(stage="plan", system="s", prompt="p2", schema=Out)
+        llm.generate(stage="outline", system="s", prompt="p2", schema=Out)
     assert llm.budget_report()["writer"]["calls"] == 1
 
 
@@ -125,7 +125,7 @@ def test_switching_a_role_to_another_provider_is_config_only(tmp_path, two_fakes
     spec = config_mod.Config().build_roles()["writer"]
     assert (spec.provider, spec.model) == ("fakeb", "some-model")
     llm = make(tmp_path, {**roles(), "writer": spec})
-    assert llm.generate(stage="plan", system="s", prompt="p", schema=Out).x == 4 and not a.calls
+    assert llm.generate(stage="outline", system="s", prompt="p", schema=Out).x == 4 and not a.calls
 
 
 def test_unknown_provider_names_the_missing_file():
@@ -199,5 +199,5 @@ def test_anthropic_adapter_request_and_response(monkeypatch):
 
     monkeypatch.setattr(anthropic.httpx, "post", post)
     r = anthropic.Adapter().complete(model="claude-x", system="sys", prompt="p", images=None, temperature=0, seed=7, max_tokens=100, schema_json=None)
-    assert seen["url"].endswith("/v1/messages") and seen["headers"]["x-api-key"] == "test-key" and seen["body"]["system"] == "sys"
+    assert seen["url"].endswith("/v1/messages") and seen["headers"]["x-api-key"] == "test-key" and seen["body"]["system"][0]["text"] == "sys" and seen["body"]["system"][0]["cache_control"] == {"type": "ephemeral"}
     assert "seed" not in seen["body"] and r.text == '{"x": 2}' and r.remaining_tokens == 900 and r.tokens_in == 5

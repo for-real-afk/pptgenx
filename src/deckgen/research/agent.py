@@ -57,6 +57,7 @@ class State(TypedDict):
     findings: list[Finding]
     seen: list[str]
     flagged_pages: int
+    passages: dict
     done: bool
     stop_reason: str
 
@@ -86,6 +87,7 @@ def build_agent(llm: LLM, tools: ResearchTools, brief: Brief, table: TierTable, 
         except Exception:  # noqa: BLE001 - references are a bonus; never fail the question for them
             pass
         new, flagged = [], st["flagged_pages"]
+        kept_passages = {u: list(v) for u, v in st["passages"].items()}
         for res in pages:
             text = res.content
             if len(text) < MIN_PAGE_CHARS:
@@ -100,7 +102,10 @@ def build_agent(llm: LLM, tools: ResearchTools, brief: Brief, table: TierTable, 
             if len(clean) < 80:
                 continue
             flagged += bool(hits)
-            passages = "\n...\n".join(select(clean, q, k=PASSAGES_PER_PAGE))  # only what is relevant to the question
+            chosen = select(clean, q, k=PASSAGES_PER_PAGE)  # only what is relevant to the question
+            kept = kept_passages.setdefault(res.url, [])
+            kept.extend(c for c in chosen if c not in kept)
+            passages = (chr(10) + "..." + chr(10)).join(chosen)
             raw = llm.generate(stage="research_extract", system=EXTRACT_SYSTEM, schema=RawFindings,
                                prompt=f"Question: {q}\n\n{quote(res.url, passages)}\n\nExtract up to 5 findings that answer the question.")
             sig, stype = signature(clean), source_type(res.url, table)
@@ -109,7 +114,7 @@ def build_agent(llm: LLM, tools: ResearchTools, brief: Brief, table: TierTable, 
                     id="", question=q, claim=rf.claim.strip(), evidence_snippet=rf.evidence_snippet.strip()[:300], source_type=stype,
                     source_url=res.url, source_title=res.title[:120], retrieved_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
                     confidence="low" if hits else rf.confidence, flagged=bool(hits), page_sig=sig))
-        return {**st, "findings": st["findings"] + new, "seen": st["seen"] + [p.url for p in pages], "flagged_pages": flagged}
+        return {**st, "findings": st["findings"] + new, "seen": st["seen"] + [p.url for p in pages], "flagged_pages": flagged, "passages": kept_passages}
 
     def advance(st: State) -> State:
         return {**st, "i": st["i"] + 1}
@@ -148,7 +153,7 @@ def run_research(llm: LLM, tools: ResearchTools, brief: Brief, table: TierTable 
     qs = brief.research_questions
     per_q = max(3, min(8, math.ceil(CONFIG.max_pages / max(len(qs), 1))))
     want_per_q = math.ceil(CONFIG.target_raw_findings / max(len(qs), 1))
-    state: dict = {"i": 0, "findings": [], "seen": [], "flagged_pages": 0, "done": False, "stop_reason": ""}
+    state: dict = {"i": 0, "findings": [], "seen": [], "flagged_pages": 0, "passages": {}, "done": False, "stop_reason": ""}
     rounds_run, followups = 0, 0
     for rnd in range(ROUNDS):
         todo = qs if rnd == 0 else [q for q in qs if sum(f.question == q for f in state["findings"]) < 0.7 * want_per_q]
@@ -167,4 +172,4 @@ def run_research(llm: LLM, tools: ResearchTools, brief: Brief, table: TierTable 
              "raw_findings": len(state["findings"]), "findings": len(findings), "usable": sum(not f.excluded for f in findings),
              "excluded": sum(f.excluded for f in findings), "conflicts": len(conflicts), "origins": len({f.origin_id for f in findings}),
              "needs_review": sum(f.needs_review for f in findings), **{f"tier{t}": sum(f.tier == t for f in findings) for t in range(5)}}
-    return Findings(findings=findings, conflicts=conflicts, stats=stats)
+    return Findings(findings=findings, conflicts=conflicts, stats=stats, passages=state["passages"])

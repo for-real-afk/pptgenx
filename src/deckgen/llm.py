@@ -21,10 +21,11 @@ from deckgen.providers import get_adapter
 from deckgen.providers.base import ProviderUnavailable, RateLimited
 
 T = TypeVar("T", bound=BaseModel)
+NL = chr(10)
 
 ROLES = ("extractor", "writer", "checker", "critic")
 STAGE_ROLE = {
-    "plan": "writer", "outline": "writer", "spec_slide": "writer", "spec_fallback_labels": "writer", "fixer": "writer",
+    "plan": "extractor", "outline": "writer", "spec_slide": "writer", "spec_fallback_labels": "writer", "fixer": "writer",
     "research_query": "extractor", "research_extract": "extractor",
     "research_crosscheck": "checker", "research_conflict_pairs": "checker", "faithfulness": "checker", "deck_consistency": "checker",
     "critic": "critic", "critic_consistency": "critic",
@@ -41,7 +42,7 @@ class QuotaExhausted(RuntimeError):
 
 class LLM(Protocol):
     def generate(self, *, stage: str, system: str, prompt: str, schema: type[T],
-                 images: list[Path] | None = None, vision: bool = False) -> T: ...
+                 images: list[Path] | None = None, vision: bool = False, cache_prefix: str = "") -> T: ...
 
 
 @dataclass
@@ -158,7 +159,8 @@ def est_tokens(system: str, prompt: str, images: list | None, max_out: int) -> i
 class RoleLLM:
     def __init__(self, roles: dict, tracer: Tracer | None = None, *, cache_dir: Path | None = None,
                  use_cache: bool | None = None, tpm: dict | None = None, limiter_factory=None,
-                 budgets: dict | None = None, max_calls: int | None = None):
+                 budgets: dict | None = None, max_calls: int | None = None, ledger=None):
+        self.ledger = ledger
         self.roles, self.tracer = roles, tracer or Tracer(None)
         self.cache_dir = cache_dir if cache_dir is not None else CONFIG.runs_dir / "_cache" / "llm"
         self.use_cache = CONFIG.llm_cache if use_cache is None else use_cache
@@ -210,14 +212,22 @@ class RoleLLM:
             (self.cache_dir / f"{key}.json").write_text(json.dumps(rec), encoding="utf-8")
 
     # -- main -------------------------------------------------------------------------------------------------------
-    def generate(self, *, stage, system, prompt, schema, images=None, vision=False):
+    def _saved_usd(self, model: str, hit: dict) -> float:
+        if not self.ledger or not hit.get("tin") and not hit.get("tout"):
+            return 0.0
+        try:
+            return self.ledger.cost(model, hit.get("tin", 0), hit.get("tout", 0), hit.get("cw", 0), hit.get("cr", 0))
+        except Exception:  # noqa: BLE001 - savings are informational; a missing price must not break a cache hit
+            return 0.0
+
+    def generate(self, *, stage, system, prompt, schema, images=None, vision=False, cache_prefix=""):
         role = STAGE_ROLE.get(stage) or ("critic" if (images or vision) else "writer")
         spec = self.roles[role]
-        full = f"{prompt}\n\nRespond with JSON only, matching this JSON Schema:\n{json.dumps(schema.model_json_schema())}"
+        full = f"{prompt}{NL}{NL}Respond with JSON only, matching this JSON Schema:{NL}{json.dumps(schema.model_json_schema())}"
         candidates = [(spec.provider, spec.model)] + ([] if CONFIG.pin_models else list(spec.fallbacks))
         last = None
         for provider, model in candidates:
-            key = self._key(role, spec, provider, model, system, full, schema, images)
+            key = self._key(role, spec, provider, model, system, cache_prefix + NL + full, schema, images)
             hit = self._cache_get(key)
             if hit is not None:
                 try:
@@ -225,27 +235,31 @@ class RoleLLM:
                     self.tracer.log(stage=stage, role=role, provider=provider, model=model, cached=True, tokens_in=0, tokens_out=0,
                                     prompt_hash=key[:12], attempt=hit.get("attempt", 1))
                     self.tracer.attempts.setdefault(stage, []).append(hit.get("attempt", 1))
+                    if self.ledger:
+                        self.ledger.record(role=role, llm_stage=stage, model=model, tin=0, tout=0, cache="hit", saved_usd=self._saved_usd(model, hit))
                     return out
                 except (ValidationError, ValueError):
                     pass  # stale or bad cache entry: recompute
             self._check_budget(role)
             try:
-                return self._call(stage, role, spec, provider, model, system, full, schema, images, key)
+                return self._call(stage, role, spec, provider, model, system, cache_prefix, full, schema, images, key)
             except QuotaExhausted as e:
                 last = e
         raise QuotaExhausted(f"{stage}: daily quota exhausted for {candidates}: {last}")
 
-    def _call(self, stage, role, spec, provider, model, system, full, schema, images, key):
+    def _call(self, stage, role, spec, provider, model, system, cache_prefix, full, schema, images, key):
         adapter, lim = get_adapter(provider), self.limiter(provider)
         schema_json = json.dumps(schema.model_json_schema())
         text_prompt, last_err, t0 = full, None, time.time()
         for attempt in range(1, CONFIG.parse_attempts + 1):
             waited0, raw = lim.waited, None
+            if self.ledger:  # hard budget guard: stop BEFORE a call that could exceed the cap (raises BudgetAbort)
+                self.ledger.check(model, system, cache_prefix + text_prompt, spec.max_tokens, len(images or []))
             for net in range(1, CONFIG.net_attempts + 1):
-                lim.before(est_tokens(system, text_prompt, images, spec.max_tokens))
+                lim.before(est_tokens(system, cache_prefix + text_prompt, images, spec.max_tokens))
                 try:
                     raw = adapter.complete(model=model, system=system, prompt=text_prompt, images=images, temperature=spec.temperature,
-                                           seed=spec.seed, max_tokens=spec.max_tokens, schema_json=schema_json)
+                                           seed=spec.seed, max_tokens=spec.max_tokens, schema_json=schema_json, cache_prefix=cache_prefix)
                     break
                 except RateLimited as e:
                     if e.daily:
@@ -257,18 +271,24 @@ class RoleLLM:
                 raise RuntimeError(f"{stage}: provider '{provider}' unavailable after {CONFIG.net_attempts} tries")
             lim.after(raw.tokens_in + raw.tokens_out, raw.remaining_tokens, raw.reset_seconds)
             self.used[role]["calls"] += 1
-            self.used[role]["tokens"] += raw.tokens_in + raw.tokens_out
+            self.used[role]["tokens"] += raw.tokens_in + raw.tokens_out + raw.cache_write_tokens + raw.cache_read_tokens
             self.tracer.log(stage=stage, role=role, provider=provider, model=raw.model or model, cached=False, prompt_hash=key[:12],
                             tokens_in=raw.tokens_in, tokens_out=raw.tokens_out, latency_s=round(time.time() - t0, 2),
                             attempt=attempt, waited_s=round(lim.waited - waited0, 2))
             try:
                 out = parse_json_as(schema, raw.text or "")
-                self.tracer.attempts.setdefault(stage, []).append(attempt)
-                self._cache_put(key, {"text": raw.text, "attempt": attempt})
-                return out
+                outcome = "ok"
             except (ValidationError, ValueError) as e:
-                last_err = e
-                text_prompt = f"{full}\n\nYour previous output was invalid: {str(e)[:500]}\nReturn corrected JSON only."
+                last_err, out, outcome = e, None, "schema_fail"
+            if self.ledger:  # the API's own token counts, priced from prices.yaml
+                self.ledger.record(role=role, llm_stage=stage, model=model, tin=raw.tokens_in, tout=raw.tokens_out, cw=raw.cache_write_tokens,
+                                   cr=raw.cache_read_tokens, latency_s=time.time() - t0, cache="miss", retry=attempt, outcome=outcome)
+            if outcome == "ok":
+                self.tracer.attempts.setdefault(stage, []).append(attempt)
+                self._cache_put(key, {"text": raw.text, "attempt": attempt, "tin": raw.tokens_in, "tout": raw.tokens_out,
+                                      "cw": raw.cache_write_tokens, "cr": raw.cache_read_tokens})
+                return out
+            text_prompt = f"{full}{NL}{NL}Your previous output was invalid: {str(last_err)[:500]}{NL}Return corrected JSON only."
         raise ValueError(f"{stage}: unparseable after {CONFIG.parse_attempts} attempts: {str(last_err)[:300]}")
 
 
@@ -283,8 +303,8 @@ def default_roles(provider: str | None = None) -> dict:
     return CONFIG.build_roles(provider)
 
 
-def make_llm(tracer: Tracer | None = None) -> RoleLLM:
-    return RoleLLM(default_roles(), tracer)
+def make_llm(tracer: Tracer | None = None, ledger=None) -> RoleLLM:
+    return RoleLLM(default_roles(), tracer, ledger=ledger)
 
 
 class FakeLLM:
@@ -293,7 +313,8 @@ class FakeLLM:
     def __init__(self, scripts: dict):
         self.scripts, self.calls = scripts, []
 
-    def generate(self, *, stage, system, prompt, schema, images=None, vision=False):
+    def generate(self, *, stage, system, prompt, schema, images=None, vision=False, cache_prefix=""):
+        prompt = cache_prefix + prompt
         self.calls.append({"stage": stage, "prompt": prompt, "images": images, "system": system})
         s = self.scripts[stage]
         out = s(prompt, images) if callable(s) else s

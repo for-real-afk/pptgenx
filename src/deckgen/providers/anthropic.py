@@ -20,11 +20,14 @@ class Adapter:
     def _headers(self) -> dict:
         return {"x-api-key": os.environ["ANTHROPIC_API_KEY"], "anthropic-version": VERSION}
 
-    def complete(self, *, model, system, prompt, images, temperature, seed, max_tokens, schema_json):
+    def complete(self, *, model, system, prompt, images, temperature, seed, max_tokens, schema_json, cache_prefix=""):
         content: list = [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
                                                       "data": base64.b64encode(Path(i).read_bytes()).decode()}} for i in images or []]
+        if cache_prefix:  # stable material first, marked for prompt caching; the variable part follows it
+            content.append({"type": "text", "text": cache_prefix, "cache_control": {"type": "ephemeral"}})
         content.append({"type": "text", "text": prompt})
-        body = {"model": model, "max_tokens": max_tokens, "temperature": temperature, "system": system,
+        sys_blocks = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+        body = {"model": model, "max_tokens": max_tokens, "temperature": temperature, "system": sys_blocks,
                 "messages": [{"role": "user", "content": content}]}  # seed is not supported by this API: ignored
         try:
             r = httpx.post(f"{BASE}/v1/messages", headers=self._headers(), json=body, timeout=180)
@@ -41,6 +44,7 @@ class Adapter:
         u = j.get("usage", {})
         rem = h.get("anthropic-ratelimit-tokens-remaining")
         return RawResult(text=text, tokens_in=u.get("input_tokens", 0), tokens_out=u.get("output_tokens", 0), model=j.get("model", model),
+                         cache_write_tokens=u.get("cache_creation_input_tokens", 0) or 0, cache_read_tokens=u.get("cache_read_input_tokens", 0) or 0,
                          remaining_tokens=int(rem) if rem and rem.isdigit() else None)
 
     def list_models(self) -> list[str]:

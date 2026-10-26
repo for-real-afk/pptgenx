@@ -19,7 +19,8 @@ class Adapter:
             self._client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
         return self._client
 
-    def complete(self, *, model, system, prompt, images, temperature, seed, max_tokens, schema_json):
+    def complete(self, *, model, system, prompt, images, temperature, seed, max_tokens, schema_json, cache_prefix=""):
+        prompt = cache_prefix + prompt
         from google.genai import errors, types
 
         parts: list = [prompt]

@@ -49,6 +49,7 @@ class Finding(_M):
     self_sourced: bool = False  # a vendor-like page making claims about itself
     excluded: bool = False  # outweighed or contested: never used on slides, listed in review_before_use.md
     excluded_reason: str = ""
+    contested: bool = False  # equal-weight conflict kept for hedged use: the slide says "sources differ"
     page_sig: list[int] = Field(default_factory=list)  # MinHash of the source page, for origin clustering
 
 
@@ -64,6 +65,7 @@ class ConflictRecord(_M):
 class Findings(_M):
     findings: list[Finding]
     conflicts: list[ConflictRecord] = Field(default_factory=list)
+    passages: dict[str, list[str]] = Field(default_factory=dict)  # source url -> the question-relevant full passages the extractor read
     stats: dict[str, int] = Field(default_factory=dict)  # tool calls, pages, cache hits, flagged pages
 
 

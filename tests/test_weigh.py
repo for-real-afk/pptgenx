@@ -32,7 +32,10 @@ def test_two_weak_copies_do_not_outvote_one_official_source():
     assert all(c.status == "resolved" and c.winner == "f03" for c in conflicts)
 
 
-def test_equal_weight_conflict_is_recorded_with_both_values_and_both_excluded():
+def test_equal_weight_conflict_is_recorded_with_both_values_and_both_excluded(monkeypatch):
+    from deckgen.config import Config
+
+    monkeypatch.setattr("deckgen.research.weigh.CONFIG", Config(hedge_contested=False))  # the drop-both behaviour
     findings = [f(1, "The ban took effect for the 1986 season", "https://a.example.org/x", "other", page="alpha text " * 40),
                 f(2, "The ban took effect for the 1987 season", "https://b.example.net/y", "other", page="beta words " * 40)]
     out, conflicts = weigh(llm_for(("f01", "f02")), findings, TierTable())
@@ -238,3 +241,11 @@ def test_long_title_slide_fits_its_box(tmp_path):
     r = subprocess.run(["node", "renderer/build_deck.js", str(p), "brand/default_v1", str(out)], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert [i for i in checks.check(out) if i.type == "overflow"] == []
+
+
+def test_contested_findings_are_kept_and_marked_for_hedging_by_default():
+    findings = [f(1, "The ban took effect for the 1986 season", "https://a.example.org/x", "other", page="alpha text " * 40),
+                f(2, "The ban took effect for the 1987 season", "https://b.example.net/y", "other", page="beta words " * 40)]
+    out, conflicts = weigh(llm_for(("f01", "f02")), findings, TierTable())
+    assert all(x.contested and not x.excluded for x in out)          # both usable, but the writer must say "sources differ"
+    assert conflicts[0].status == "unresolved" and len(conflicts[0].sources) == 2

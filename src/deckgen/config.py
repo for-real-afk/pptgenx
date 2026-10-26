@@ -12,7 +12,7 @@ load_dotenv(ROOT / ".env")
 
 DEFAULT_MODEL = {"gemini": "gemini-3.5-flash", "groq": "openai/gpt-oss-120b", "anthropic": "claude-sonnet-5-5"}
 ROLE_TEMPERATURE = {"extractor": 0.1, "writer": 0.2, "checker": 0.0, "critic": 0.0}  # low and fixed for reproducibility
-ROLE_MAX_TOKENS = {"extractor": 3000, "writer": 4096, "checker": 2048, "critic": 2048}
+ROLE_MAX_TOKENS = {"extractor": 2000, "writer": 3000, "checker": 1500, "critic": 1500}  # a runaway response cannot burn the budget
 
 
 def _int(name: str, default: int) -> int:
@@ -73,6 +73,12 @@ class Config:
     pin_models: bool = os.environ.get("DECKGEN_PIN_MODELS", "") == "1"  # QA/evals: no silent fallback
     faithfulness_check: bool = os.environ.get("DECKGEN_FAITHFULNESS", "1") == "1"
     max_llm_calls: int = _int("DECKGEN_MAX_LLM_CALLS", 1500)
+    # cost ledger and budget guard (USD, whole run, all roles, retries and QA included)
+    budget_usd: float = _float("DECKGEN_BUDGET_USD", 25.0)
+    # writer behaviour (round 3): what worked in the hand-built comparison deck
+    writer_source_text: bool = os.environ.get("DECKGEN_WRITER_SOURCE_TEXT", "1") == "1"      # relevant full source passages go to the writer
+    writer_chooses_layout: bool = os.environ.get("DECKGEN_WRITER_CHOOSES_LAYOUT", "1") == "1"  # outline layout_hint is a suggestion only
+    hedge_contested: bool = os.environ.get("DECKGEN_HEDGE_CONTESTED", "1") == "1"            # equal-weight conflicts are hedged on the slide, not dropped
     # QA
     qa_max_rounds: int = 3
     soffice_timeout: int = 120

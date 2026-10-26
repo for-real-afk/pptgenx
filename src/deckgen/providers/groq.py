@@ -34,7 +34,8 @@ class Adapter:
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {os.environ['GROQ_API_KEY']}"}
 
-    def complete(self, *, model, system, prompt, images, temperature, seed, max_tokens, schema_json):
+    def complete(self, *, model, system, prompt, images, temperature, seed, max_tokens, schema_json, cache_prefix=""):
+        prompt = cache_prefix + prompt
         content: list | str = prompt
         if images:
             if not model.startswith(VISION_MODELS):

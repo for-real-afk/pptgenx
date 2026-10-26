@@ -121,3 +121,15 @@ heading-name check, two-source numbers); fetch full pages for research (6000-cha
   that the first live runs exposed: same-origin pairs are not conflicts, conflicts need a shared subject (32 -> 3), title slide box too small, closing body too narrow,
   future-tense claims need support. Five other golden topics NOT run.
 - Spread is 0 on both topics but the seed is fixed at 7 and temperature is 0.2: that shows determinism of this setup, not robustness. Different seeds not tried.
+
+## Round 3: Anthropic run infrastructure ($25 hard cap)
+- `ledger.py`: per-call `runs/<id>/usage.jsonl` (tokens in/out/cache-write/cache-read from the API response, USD from `config/prices.yaml`, latency, local cache hit/miss, retry, outcome),
+  stage lines ("stage, calls, tokens, cost, running total of cap"), soft warnings at 60/85%, `usage_summary.md` (also on abort). Budget guard BEFORE every call: counted input (3 chars/token, conservative)
+  + max_tokens at output price; abort if total + estimate > cap (`--budget`, default `budget_usd: 25`). Missing price = stop (`PriceMissing`), never guessed.
+- `prices.yaml` is deliberately all null: fill input/output/cache_write/cache_read (USD per million tokens) for `claude-haiku-5-5` and `claude-sonnet-5-5` before any run. `deckgen doctor` reports missing prices/key.
+- `deckgen estimate`: dry upper/expected estimate per stage; exits 3 (ask first) if upper > $20. Input sizes are fixed assumptions, not tuned.
+- Prompt caching: writer prompt split into a stable prefix (style, layouts, limits, rules; `cache_control` on the Anthropic adapter) and a variable part (`spec/writer_prompt.py`).
+- Roles: plan/research reading = extractor (Haiku), outline/slides/fixer = writer (Sonnet), checker (Sonnet; same family as writer: known limitation), critic (Haiku). Per-role max_tokens in config.
+- Behind default-on flags (`DECKGEN_WRITER_SOURCE_TEXT`, `DECKGEN_WRITER_CHOOSES_LAYOUT`, `DECKGEN_HEDGE_CONTESTED`): verbatim source passages to the writer, layout chosen per slide (hint only),
+  equal-weight conflicts kept as `contested` and hedged; every slide's speaker notes end with its sources (+ "Verify:" for contested/single-source). No new check types.
+- Tests: cap hit mid-run with a fake provider (never exceeded, summary written), soft warnings, cache-token pricing, prompt split. NOT run live yet.

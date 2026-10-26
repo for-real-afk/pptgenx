@@ -1,0 +1,5 @@
+# USD per MILLION tokens. Fill these in from the Anthropic pricing page. Left as null on purpose: the ledger refuses to make a call
+# for a model whose prices are missing (it never guesses). cache_write = cost of writing a prompt-cache entry, cache_read = cost of reading one.
+models:
+  claude-haiku-5-5:  {input: null, output: null, cache_write: null, cache_read: null}
+  claude-sonnet-5-5: {input: null, output: null, cache_write: null, cache_read: null}

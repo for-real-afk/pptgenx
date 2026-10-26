@@ -46,7 +46,7 @@ def _write(path: Path, model) -> None:
 
 def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *, auto_approve: bool = False,
                  from_stage: str | None = None, do_qa: bool = True,
-                 confirm: Callable | None = None, edit: Callable | None = None) -> dict:
+                 confirm: Callable | None = None, edit: Callable | None = None, ledger=None) -> dict:
     run_dir.mkdir(parents=True, exist_ok=True)
     brand_dir = CONFIG.brands_dir / req.brand
     subprocess.run(["node", str(CONFIG.renderer_dir / "gen_manifest.js"), str(brand_dir)], check=True, capture_output=True)  # manifest can never lag layouts.js
@@ -58,9 +58,13 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
         if path.exists() and STAGES.index(name) < force:
             return model_cls.model_validate_json(path.read_text(encoding="utf-8"))
         t0 = time.time()
+        if ledger:
+            ledger.stage = name
         out = make()
         timings[name] = round(time.time() - t0, 1)
         _write(path, out)
+        if ledger:
+            ledger.stage_line(name)
         return out
 
     brief = stage("plan", run_dir / "brief.json", Brief,
@@ -80,8 +84,12 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
             spec = DeckSpec.model_validate_json(final_path.read_text(encoding="utf-8"))
         else:
             t0 = time.time()
+            if ledger:
+                ledger.stage = "qa"
             spec, qa_report = fix_loop.run_qa(spec, brand_dir, run_dir, llm, fix_loop.LLMFixer(llm))
             timings["qa"] = round(time.time() - t0, 1)
+            if ledger:
+                ledger.stage_line("qa")
             _write(final_path, spec)
         if qa_report is None and (run_dir / "qa_report.json").exists():
             qa_report = QAReport.model_validate_json((run_dir / "qa_report.json").read_text(encoding="utf-8"))
@@ -128,6 +136,8 @@ def run_pipeline(req: Request, llm: LLM, tools: ResearchTools, run_dir: Path, *,
         "roles": tracer.role_summary() if isinstance(tracer, Tracer) else {},
         "budget": llm.budget_report() if hasattr(llm, "budget_report") else {},
         "models": sorted(tracer.models) if isinstance(tracer, Tracer) else [],
+        "cost": {"total_usd": round(ledger.total, 4), "budget_usd": ledger.budget} if ledger else None,
+        "outline_auto_approved": bool(auto_approve),
         "qa_stopped": qa_report.stopped if qa_report else None,
         "qa_blocking_remaining": len(policy.blocking(qa_report.remaining)) if qa_report else None,
         "qa_rounds": [{"round": r.round, "action": r.action, "accepted": r.accepted, "score": r.score}
@@ -236,6 +246,7 @@ def report_md(r: dict) -> str:
             f"- models: {r['models']}", f"- {r['llm']}",
             "- roles: " + "; ".join(f"{k}: {','.join(v['models'])} ({v['calls']} calls, {v['cache_hits']} cached, waited {v['waited_s']}s)" for k, v in r["roles"].items()),
             f"- budget use: {r['budget']}",
+            f"- cost: {r['cost']}; outline auto-approved: {r.get('outline_auto_approved')}",
             f"- cross-slide problems repaired on slides {r['deck_problems_repaired_slides']}; unresolved: {r['deck_problems_unresolved'] or 'none'}",
             f"- shortfall: requested {r['shortfall']['requested']}, built {r['shortfall']['built']}; dropped by category {r['shortfall']['dropped_by_category'] or 'none'}; "
             f"deleted as redundant {r['shortfall']['deleted_as_redundant']}; warnings {r['shortfall']['warnings']}; gate profile '{r['gate_profile']}'",
