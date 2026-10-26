@@ -34,7 +34,7 @@ def fake_build(spec, brand_dir, out):
 def fake_render(deck, out):
     (out / "images").mkdir(parents=True, exist_ok=True)
     for i in range(1, 4):
-        Image.new("RGB", (1600, 900), "white").save(out / "images" / f"slide-{i}.png")
+        Image.new("RGB", (1600, 900), "white").save(out / "images" / f"slide-{i:02d}.jpg")
 
 
 def use(i, name, **args):
@@ -128,6 +128,7 @@ def test_finish_is_refused_until_the_spec_validates_and_blocking_issues_are_gone
     assert err and "blocking automated issues" in out and not t.finished
     blocking.clear()
     t.call("build_deck", {"spec_path": "spec.json"})
+    t.call("render_slides", {"deck_path": "deck_3.pptx", "slides": [1, 2, 3]})
     assert t.call("finish", {"deck_path": "deck_3.pptx", "review_notes_path": "review.md"})[1] is False and (tmp_path / "deck.pptx").exists()
 
 
@@ -159,3 +160,16 @@ def test_render_rounds_are_capped_and_old_images_are_trimmed(tmp_path, roles):
             {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "b", "content": [img]}]}]
     out = trim(msgs, {"a": "render_slides", "b": "render_slides"})
     assert out[1]["content"][0]["content"][0]["type"] == "text" and out[2]["content"][0]["content"][0]["type"] == "image"
+
+
+def test_finish_is_refused_until_every_slide_was_viewed(tmp_path, roles):
+    t = AgentTools(tmp_path, CONFIG.brands_dir / "default_v1", Ledger(None, PRICES, 8.0, echo=lambda s: None), haiku_model="m-read", max_slides=13,
+                   search=FakeSearch(), builder=fake_build, renderer=fake_render, inspector=lambda d, s: [])
+    t.call("write_file", {"path": "spec.json", "content": json.dumps(SPEC)})
+    t.call("write_file", {"path": "review.md", "content": "- x"})
+    t.call("validate_spec", {"path": "spec.json"})
+    t.call("build_deck", {"spec_path": "spec.json"})
+    out, err = t.call("finish", {"deck_path": "work/deck_1.pptx", "review_notes_path": "review.md"})      # a work/ prefix is accepted
+    assert err and "not looked at slides [1, 2, 3]" in out
+    t.call("render_slides", {"deck_path": "work/deck_1.pptx", "slides": [1, 2, 3]})
+    assert t.call("finish", {"deck_path": "deck_1.pptx", "review_notes_path": "review.md"})[1] is False

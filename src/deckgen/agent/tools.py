@@ -85,6 +85,7 @@ class AgentTools:
         return err, True
 
     def _safe(self, rel: str, root: Path) -> Path:
+        rel = rel.replace("\\", "/").removeprefix(f"{root.name}/").lstrip("/") if not Path(rel).is_absolute() or rel.startswith("/") else rel
         p = Path(rel).resolve() if Path(rel).is_absolute() else (root / rel).resolve()
         if not p.is_relative_to(root.resolve()):
             raise ToolError(f"path '{rel}' is outside {root.name}/; use a file name inside it")
@@ -194,7 +195,7 @@ class AgentTools:
         p = self._safe(path, self.work)
         if not p.exists():
             raise ToolError(f"work/{path} does not exist")
-        return p.read_text(encoding="utf-8")
+        return p.read_text(encoding="utf-8", errors="replace")
 
     # ---- spec, build, look ------------------------------------------------------------------------------------------------------------
     def _load_spec(self, spec_path: str) -> tuple[DeckSpec, str]:
@@ -264,7 +265,7 @@ class AgentTools:
             if s.id not in self.best or cur[0] <= self.best[s.id][0]:
                 self.best[s.id] = cur
         self.last_spec_path = self._safe(spec_path, self.work)
-        self.builds[str(deck)] = {"spec_sha": sha, "valid": sha in self.validated, "blocking": len(block), "per_slide": per}
+        self.builds[str(deck)] = {"spec_sha": sha, "valid": sha in self.validated, "blocking": len(block), "per_slide": per, "slides": len(spec.slides)}
         lines = [f"slide {i.slide} [{i.severity}] {i.type}: {i.description[:200]}" for i in sorted(issues, key=lambda x: x.slide)][:40]
         note = "" if sha in self.validated else NL + "NOTE: this spec was not validated with validate_spec; finish will refuse until it passes."
         return f"built work/{deck.name} ({len(spec.slides)} slides). Blocking automated issues: {len(block)}." + NL + (NL.join(lines) or "no automated issues") + note
@@ -278,7 +279,7 @@ class AgentTools:
         if not out.exists():
             out.mkdir(parents=True)
             (self._render or _default_render)(deck, out)
-        images = sorted((out / "images").glob("*.png")) or sorted(out.glob("*.png"))
+        images = sorted((out / "images").glob("slide-*.jpg"), key=lambda p: int(p.stem.split("-")[1]))
         blocks: list[dict] = []
         for n in slides:
             if not 1 <= n <= len(images):
@@ -309,6 +310,9 @@ class AgentTools:
             problems.append("the spec behind this deck did not pass validate_spec")
         if rec["blocking"]:
             problems.append(f"{rec['blocking']} blocking automated issues remain on slides {sorted(rec['per_slide'])}")
+        unseen = sorted(set(range(1, rec.get("slides", 0) + 1)) - self.viewed)
+        if unseen:
+            problems.append(f"you have not looked at slides {unseen}: call render_slides on them and fix what you see first")
         notes = self._safe(review_notes_path, self.work)
         if not notes.exists():
             problems.append(f"review notes file work/{review_notes_path} does not exist")
