@@ -81,6 +81,9 @@ def flatten(system: list[dict], tools: list[dict], messages: list[dict]) -> tupl
 def trim(messages: list[dict], names: dict[str, str]) -> list[dict]:
     """Drop images from earlier renders (keep the latest set) and shrink old bulky tool results. The first message is never touched."""
     msgs = copy.deepcopy(messages)
+    for m in msgs:   # thinking blocks carry signatures bound to the exact request that produced them; replaying them is rejected, so history keeps only text and tool calls
+        if m["role"] == "assistant" and isinstance(m["content"], list):
+            m["content"] = [b for b in m["content"] if b.get("type") not in ("thinking", "redacted_thinking")] or [{"type": "text", "text": "(working)"}]
     result_msgs = [i for i, m in enumerate(msgs) if i and m["role"] == "user" and isinstance(m["content"], list)
                    and any(b.get("type") == "tool_result" for b in m["content"])]
     with_images = [i for i in result_msgs if any(isinstance(b.get("content"), list) and any(x.get("type") == "image" for x in b["content"]) for b in msgs[i]["content"])]
