@@ -337,7 +337,7 @@ module.exports = async ({ pres, C, theme, h }) => {
     bullets: ["First comment", "Second comment"], caption: "A is typical; B and C are named cars" });
   const k = pres.addSlide({ masterName: "CLOSING" });
   h.title(k, "A takeaway close");
-  h.closing(k, ["One takeaway", "Another takeaway", "A third takeaway"]);
+  h.closing(h.ctx(pres, k, C, theme), ["One takeaway", "Another takeaway", "A third takeaway"]);
 };
 """
 

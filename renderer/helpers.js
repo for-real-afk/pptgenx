@@ -84,16 +84,17 @@ function chartSlide(c, { type, title: chartTitle, categories, series, bullets: p
     { isTextBox: true, margin: 0, x: 8.9, y: CONTENT.y, w: 3.83, h: 4.85, fontSize: 16, color: c.C.text1, valign: "middle", objectName: "Commentary" });
 }
 
-/** Closing slide body: bullets at 24 pt, vertically centred so the slide is filled. Use 3 bullets. */
-const closing = (slide, points) => {
-  need(Array.isArray(points) && points.length > 0, "closing", "closing(slide, bullets: string[])");
-  slide.addText(points.map((t, i) => ({ text: t, options: { bullet: true, breakLine: i < points.length - 1, paraSpaceAfter: 22 } })), { placeholder: "body", fontSize: 24, valign: "middle" });
+/** Closing slide body: bullets at 24 pt on the dark layout, in a box that is vertically centred in the area left of the brand motif. Use 3 bullets. */
+const closing = (c, points) => {
+  need(isCtx(c) && Array.isArray(points) && points.length > 0, "closing", "closing(c, bullets: string[]) with c = h.ctx(pres, slide, C, theme)");
+  c.slide.addText(points.map((t, i) => ({ text: t, options: { bullet: true, breakLine: i < points.length - 1, paraSpaceAfter: 22 } })),
+    { isTextBox: true, margin: 0, x: MARGIN, y: 2.4, w: 8.2, h: 4.2, fontSize: 24, color: c.C.background1, valign: "middle", objectName: "Closing bullets" });
 };
 
 /** Sources in two columns at 16 pt: full title, then URL and tier. entries: [{ title, url, tier }]. Throws if they do not fit. */
 function sources(c, entries) {
   need(isCtx(c) && Array.isArray(entries) && entries.every((e) => e.title && e.url), "sources", "sources(c, [{ title, url, tier }])");
-  const colW = 5.9, top = CONTENT.y - 0.15, maxH = SOURCE_Y - 0.1 - top;
+  const colW = 5.9, top = CONTENT.y, maxH = SOURCE_Y - top;   // below the title box, above the footer
   const heightOf = (e) => textH(e.title, 16, colW) + textH(`${e.url} (tier ${e.tier})`, 16, colW) + 0.22;
   const columns = [[], []];
   let used = 0, col = 0;
