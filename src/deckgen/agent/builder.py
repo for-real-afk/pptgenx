@@ -54,6 +54,22 @@ class BuildRecord:
         return len(self.hard), -self.slides, len(self.blocking)
 
 
+def fingerprint(deck: Path) -> list[tuple]:
+    """Per slide: every shape's name, position, size, text and first font size. A slide counts as changed when any of it changed (a re-laid slide too)."""
+    from pptx import Presentation
+
+    out = []
+    for slide in Presentation(deck).slides:
+        shapes = []
+        for sh in slide.shapes:
+            text = sh.text_frame.text if sh.has_text_frame else ""
+            runs = [r for p in sh.text_frame.paragraphs for r in p.runs] if sh.has_text_frame else []
+            size = runs[0].font.size.pt if runs and runs[0].font.size else 0
+            shapes.append((sh.name, round((sh.left or 0) / 9144), round((sh.top or 0) / 9144), round((sh.width or 0) / 9144), round((sh.height or 0) / 9144), text, size))
+        out.append(tuple(sorted(shapes)))
+    return out
+
+
 def default_inspector(brand_dir: Path) -> Inspector:
     from deckgen.qa import checks, validate_pptx
     from deckgen.qa.slide_text import content_issues, extract
@@ -213,10 +229,8 @@ class DeckBuilder:
         """Slides that must have been looked at: all of them, or in a fix pass only those whose text differs from the baseline."""
         if self.baseline is None:
             return set(range(1, record.slides + 1))
-        from deckgen.qa.slide_text import extract
-
-        now = extract(record.deck)
-        return {s.number for s in now if s.number > len(self.baseline) or (s.title, s.texts, s.tables, s.charts) != self.baseline[s.number - 1]}
+        now = fingerprint(record.deck)
+        return {n for n, fp in enumerate(now, 1) if n > len(self.baseline) or fp != self.baseline[n - 1]}
 
     def t_finish(self, deck_path: str, review_notes_path: str) -> str:
         deck = self._deck(deck_path)

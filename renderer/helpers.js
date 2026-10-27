@@ -1,7 +1,8 @@
 // Helpers a deck build script may use. Every shape is made from scheme colours (ctx.C), fresh option objects, and text boxes with margin 0.
 // ctx = helpers.ctx(pres, slide, C, theme). Rects are { x, y, w, h } in inches; the content area below the title is helpers.CONTENT.
 const { CONTENT, MARGIN, GAP, W, H, SOURCE_Y, cols, rows, grid } = require("./grid");
-const compose = require("./compose");
+const compose = require("./compose/fit");        // content-fitted compositions (the fixed-size ones in compose/index.js serve the staged pipeline)
+const { textH } = compose;
 const { text, panel, iconCircle } = require("./compose/common");
 const { addChart, addTable } = require("./build_deck");
 
@@ -67,10 +68,55 @@ const chart = (c, type, title, categories, series, r = CONTENT, numberFormat) =>
 /** Speaker notes. Name the source of each claim on the slide. */
 const notes = (c, str) => c.slide.addNotes(str);
 
+/** Slide title in the title placeholder: 36 pt for a short title, 32 pt otherwise (shorten the text rather than shrinking further). */
+const title = (slide, str) => {
+  need(typeof str === "string" && str.length > 0, "title", "title(slide, text: string)");
+  slide.addText(str, { placeholder: "title", fontSize: str.length <= 46 ? 36 : 32 });
+};
+
+/** Chart slide on the CHART_COMMENTARY layout: the chart takes about 65% of the width, commentary beside it at 16 pt, an optional 12 pt caption under the chart. */
+function chartSlide(c, { type, title: chartTitle, categories, series, bullets: points, caption, numberFormat }) {
+  need(isCtx(c) && Array.isArray(points) && points.length > 0, "chartSlide", "chartSlide(c, { type, title, categories, series, bullets: string[], caption?: string })");
+  const chartRect = { x: MARGIN, y: CONTENT.y, w: 7.9, h: caption ? 4.3 : 4.85 };
+  chart(c, type, chartTitle, categories, series, chartRect, numberFormat);
+  if (caption) textBox(c, caption, { x: MARGIN, y: CONTENT.y + 4.4, w: 7.9, h: 0.4, fontSize: 12, color: c.C.text1, objectName: "Chart caption" });
+  c.slide.addText(points.map((t, i) => ({ text: t, options: { bullet: true, breakLine: i < points.length - 1, paraSpaceAfter: 14 } })),
+    { isTextBox: true, margin: 0, x: 8.9, y: CONTENT.y, w: 3.83, h: 4.85, fontSize: 16, color: c.C.text1, valign: "middle", objectName: "Commentary" });
+}
+
+/** Closing slide body: bullets at 24 pt, vertically centred so the slide is filled. Use 3 bullets. */
+const closing = (slide, points) => {
+  need(Array.isArray(points) && points.length > 0, "closing", "closing(slide, bullets: string[])");
+  slide.addText(points.map((t, i) => ({ text: t, options: { bullet: true, breakLine: i < points.length - 1, paraSpaceAfter: 22 } })), { placeholder: "body", fontSize: 24, valign: "middle" });
+};
+
+/** Sources in two columns at 16 pt: full title, then URL and tier. entries: [{ title, url, tier }]. Throws if they do not fit. */
+function sources(c, entries) {
+  need(isCtx(c) && Array.isArray(entries) && entries.every((e) => e.title && e.url), "sources", "sources(c, [{ title, url, tier }])");
+  const colW = 5.9, top = CONTENT.y - 0.15, maxH = SOURCE_Y - 0.1 - top;
+  const heightOf = (e) => textH(e.title, 16, colW) + textH(`${e.url} (tier ${e.tier})`, 16, colW) + 0.22;
+  const columns = [[], []];
+  let used = 0, col = 0;
+  for (const e of entries) {
+    const hh = heightOf(e);
+    if (used + hh > maxH && col === 0) { col = 1; used = 0; }
+    if (used + hh > maxH) throw new Error(`h.sources: ${entries.length} sources do not fit in two columns at 16 pt; keep the sources the deck actually used`);
+    columns[col].push(e);
+    used += hh;
+  }
+  columns.forEach((list, k) => {
+    if (!list.length) return;
+    c.slide.addText(list.flatMap((e, i) => [
+      { text: e.title, options: { bold: true, breakLine: true } },
+      { text: `${e.url} (tier ${e.tier})`, options: { color: c.C.accent3, breakLine: i < list.length - 1, paraSpaceAfter: 12 } },
+    ]), { isTextBox: true, margin: 0, x: MARGIN + k * (colW + 0.33), y: top, w: colW, h: maxH, fontSize: 16, color: c.C.text1, valign: "top", objectName: `Sources column ${k + 1}` });
+  });
+}
+
 const cards = composed("cards", "{ icon, heading, body } (2, 3, 4 or 6)");
 const stats = composed("stats", "{ value, label, detail? } (2 to 4)");
 const timeline = composed("timeline", "{ year, heading, body } (3 to 5)");
 const comparison = composed("comparison", "{ heading, bullets: string[] } (exactly 2)");
 const icon_rows = composed("icon_rows", "{ icon, heading, body } (2 to 5)");
 
-module.exports = { ctx, textBox, bullets, card, badge, stat, table, chart, notes, panel, iconCircle, cards, stats, timeline, comparison, icon_rows, CONTENT, MARGIN, GAP, W, H, SOURCE_Y, cols, rows, grid };
+module.exports = { ctx, textBox, bullets, card, badge, stat, table, chart, notes, title, chartSlide, closing, sources, panel, iconCircle, cards, stats, timeline, comparison, icon_rows, CONTENT, MARGIN, GAP, W, H, SOURCE_Y, cols, rows, grid };

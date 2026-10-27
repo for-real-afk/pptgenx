@@ -10,14 +10,14 @@ const panel = (ctx, r, name) =>
   });
 
 /** Motif: icon in a colored circle (works on light and dark). */
-async function iconCircle(ctx, icon, x, y, d, name) {
+async function iconCircle(ctx, icon, x, y, d, name, alt) {
   ctx.slide.addShape(ctx.pres.ShapeType.ellipse, {
     x, y, w: d, h: d, fill: { color: ctx.C.accent1 }, line: { type: "none" }, objectName: `${name} circle`,
   });
   const pad = d * 0.25;
   ctx.slide.addImage({
     data: await iconPng(icon, ctx.theme.colors.lt1), x: x + pad, y: y + pad, w: d - 2 * pad, h: d - 2 * pad,
-    altText: `${icon} icon`, objectName: `${name} icon`,
+    altText: alt ? `Icon: ${alt}` : `${icon} icon`, objectName: `${name} icon`,
   });
 }
 

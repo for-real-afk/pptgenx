@@ -307,3 +307,73 @@ def test_fix_pass_starts_in_look_phase_needs_only_changed_slides_viewed_and_clos
     assert r["stop_reason"] == "finished" and r["viewed_slides"] == [2] and r["never_viewed"] == [] and r["total_usd"] <= 0.6      # slide 1 was not changed: no new look needed
     assert (tmp_path / "out" / "deck.pptx").exists() and "A changed point" in (tmp_path / "out" / "work" / "build.js").read_text()
     assert [row["pipeline_stage"] for row in map(json.loads, (tmp_path / "out" / "usage.jsonl").read_text().splitlines()) if row["role"] == "agent"][0] == "look"
+
+
+CARDS_SCRIPT = """
+module.exports = async ({ pres, C, theme, h, CONTENT }) => {
+  const s = pres.addSlide({ masterName: "TITLE_ONLY" });
+  h.title(s, "Short cards must not be tall boxes");
+  const c = h.ctx(pres, s, C, theme);
+  await h.cards(c, [
+    { badge: 1, heading: "First", body: "A short line" },
+    { icon: "FaBolt", heading: "Second", body: "Another short line" },
+    { icon: "FaShieldAlt", alt: "a shield", heading: "Third", body: "One more line" },
+  ], CONTENT);
+};
+"""
+SOURCES_SCRIPT = """
+const E = (n) => ({ title: "A reasonably long page title number " + n + " from a site", url: "example.org/section/page-" + n + "/article", tier: (n % 4) + 1 });
+module.exports = async ({ pres, C, theme, h }) => {
+  const s = pres.addSlide({ masterName: "SOURCES" });
+  h.title(s, "Sources");
+  h.sources(h.ctx(pres, s, C, theme), [1, 2, 3, 4, 5, 6, 7, 8].map(E));
+};
+"""
+CLOSING_CHART_SCRIPT = """
+module.exports = async ({ pres, C, theme, h }) => {
+  const s = pres.addSlide({ masterName: "CHART_COMMENTARY" });
+  h.title(s, "A chart that fills its area");
+  h.chartSlide(h.ctx(pres, s, C, theme), { type: "bar", title: "Peak power (hp)", categories: ["A", "B", "C"], series: [{ name: "hp", values: [250, 500, 600] }],
+    bullets: ["First comment", "Second comment"], caption: "A is typical; B and C are named cars" });
+  const k = pres.addSlide({ masterName: "CLOSING" });
+  h.title(k, "A takeaway close");
+  h.closing(k, ["One takeaway", "Another takeaway", "A third takeaway"]);
+};
+"""
+
+
+def _shapes(deck, slide_no):
+    return {sh.name: sh for sh in Presentation(deck).slides[slide_no - 1].shapes}
+
+
+def test_cards_fit_their_content_instead_of_filling_a_tall_box(tmp_path, roles):
+    tools, _, _ = make_tools(tmp_path)
+    tools.call("write_build_script", {"path": "build.js", "content": CARDS_SCRIPT})
+    out, err = tools.call("run_build", {})
+    assert not err and "Overflow or off-slide issues: 0" in out and "empty_space" not in out
+    shapes = _shapes(tmp_path / "work" / "deck_1.pptx", 1)
+    inches = lambda sh: sh.height / 914400                                                  # noqa: E731
+    assert 1.6 < inches(shapes["Card 1 panel"]) < 3.2                                        # the old fixed card was 3.9 in tall
+    body = shapes["Card 1 body"].text_frame.paragraphs[0].runs[0].font.size.pt
+    head = shapes["Card 1 heading"].text_frame.paragraphs[0].runs[0].font.size.pt
+    assert body >= 16 and head >= 20
+    assert "Icon: a shield" in shapes["Card 3 icon"]._element.xml and "Card 1 badge" in shapes                      # real alt text, number badge when no icon fits
+
+
+def test_sources_slide_uses_two_columns_without_overflow(tmp_path, roles):
+    tools, _, _ = make_tools(tmp_path)
+    tools.call("write_build_script", {"path": "build.js", "content": SOURCES_SCRIPT})
+    out, err = tools.call("run_build", {})
+    assert not err and "Overflow or off-slide issues: 0" in out, out
+    cols = [n for n in _shapes(tmp_path / "work" / "deck_1.pptx", 1) if n.startswith("Sources column")]
+    assert len(cols) == 2
+
+
+def test_chart_slide_and_closing_helpers(tmp_path, roles):
+    tools, _, _ = make_tools(tmp_path)
+    tools.call("write_build_script", {"path": "build.js", "content": CLOSING_CHART_SCRIPT})
+    out, err = tools.call("run_build", {})
+    assert not err and "Overflow or off-slide issues: 0" in out, out
+    chart = [sh for sh in Presentation(tmp_path / "work" / "deck_1.pptx").slides[0].shapes if sh.has_chart][0]
+    assert chart.width / 914400 >= 0.6 * 12.13                                               # at least 60% of the content width
+    assert _shapes(tmp_path / "work" / "deck_1.pptx", 1)["Chart caption"].text_frame.paragraphs[0].runs[0].font.size.pt >= 12

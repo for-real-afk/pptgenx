@@ -8,6 +8,7 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
+from deckgen.agent.builder import fingerprint
 from deckgen.agent.loop import AgentLoop, anthropic_transport
 from deckgen.agent.phases import PhaseBudget
 from deckgen.agent.run import _execute, system_prompt
@@ -27,7 +28,11 @@ def source_table(src_run: Path, tiers: TierTable) -> str:
     """Every page the source run saved: path, URL, tier. Given to the agent so it never has to guess a URL or a tier."""
     index_file = src_run / "sources" / "index.json"
     index = json.loads(index_file.read_text(encoding="utf-8")) if index_file.exists() else {}
-    return NL.join(f"- {path}: {url} (tier {tiers.tier(url)})" for url, path in index.items())
+    def title(path: str) -> str:
+        first = (src_run / path).read_text(encoding="utf-8").split(NL, 1)[0].lstrip("# ").strip()
+        return first or "(untitled page)"
+
+    return NL.join(f"- {path}: {title(path)} | {url} | tier {tiers.tier(url)}" for url, path in index.items())
 
 
 def slide_texts(deck: Path, numbers: list[int]) -> str:
@@ -54,7 +59,7 @@ def run_fixup(src_run: Path, out_dir: Path, instructions: str, slides: list[int]
     tools = AgentTools(out_dir, brand_dir, ledger, phases, haiku_model=roles["extractor"].model, max_slides=99, max_pages=0, free_pages=0,
                        max_slide_rounds=CONFIG.agent_max_slide_rounds, tier_table=table, inspector=inspector, renderer=renderer)
     tools.builder.script = "build.js"
-    tools.builder.baseline = [(s.title, s.texts, s.tables, s.charts) for s in extract(baseline_deck)]
+    tools.builder.baseline = fingerprint(baseline_deck)
     defs = [d for d in tool_definitions() if d["name"] not in RESEARCH_TOOLS]
     loop = AgentLoop(tools, ledger, phases, model=roles["writer"].model, system_text=system_prompt(brand_dir), tool_defs=defs, max_calls=CONFIG.agent_max_tool_calls,
                      max_seconds=CONFIG.agent_max_seconds, transport=transport or anthropic_transport, max_tokens=FIX_MAX_TOKENS)
@@ -62,6 +67,6 @@ def run_fixup(src_run: Path, out_dir: Path, instructions: str, slides: list[int]
             f"({len(tools.builder.baseline)} slides). Budget: ${budget:.2f} in total, so be economical: read only what you need, make the listed edits with edit_build_script "
             f"(not whole-file rewrites), run_build once, view only the slides you changed with render_slides, then write review.md and call finish.{NL}{NL}"
             f"INSTRUCTIONS:{NL}{instructions}{NL}{NL}CURRENT TEXT OF THE SLIDES TO CHANGE:{NL}{slide_texts(baseline_deck, slides)}{NL}{NL}"
-            f"PAGES THE DECK WAS BUILT FROM (path: url (tier)); saved in sources/, read with read_source if you must check a claim:{NL}{source_table(src_run, table)}{NL}{NL}"
+            f"PAGES THE DECK WAS BUILT FROM (path: page title | url | tier); saved in sources/, read with read_source if you must check a claim:{NL}{source_table(src_run, table)}{NL}{NL}"
             f"Your earlier notes are in work/notes.md and work/facts.md. Slides you do not change are not re-checked: unchanged slides need no new look.")
     return _execute(loop, tools, ledger, phases, out_dir, f"fix pass on {src_run.name}", len(tools.builder.baseline), task)
